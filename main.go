@@ -306,10 +306,20 @@ func performChromedpOAuth(authURL, email, password, scheme string, progress Prog
 	}
 	err = chromedp.Run(browserCtx,
 		chromedp.Click(submitSelector, chromedp.ByQuery),
-		chromedp.Sleep(5*time.Second),
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit login: %v", err)
+	}
+
+	// Wait for response with periodic progress updates
+	for i := 0; i < 5; i++ {
+		if oauthCode != "" {
+			break
+		}
+		if progress != nil && i > 0 {
+			progress(fmt.Sprintf("Processing login... (%ds)", i*2))
+		}
+		chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 	}
 
 	// Check if we captured the code already (direct redirect)
@@ -339,7 +349,7 @@ func performChromedpOAuth(authURL, email, password, scheme string, progress Prog
 
 	// Wait for authorization confirmation page (if present)
 	if progress != nil {
-		progress("Waiting for authorization...")
+		progress("Checking for authorization page...")
 	}
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(authorizeSelector, chromedp.ByQuery),
@@ -351,15 +361,25 @@ func performChromedpOAuth(authURL, email, password, scheme string, progress Prog
 		}
 		chromedp.Run(browserCtx,
 			chromedp.Click(authorizeSelector, chromedp.ByQuery),
-			chromedp.Sleep(3*time.Second),
 		)
-	}
 
-	// Wait a bit more for redirect
-	chromedp.Run(browserCtx, chromedp.Sleep(5*time.Second))
+		// Wait for redirect with periodic updates
+		for i := 0; i < 5; i++ {
+			if oauthCode != "" {
+				break
+			}
+			if progress != nil {
+				progress(fmt.Sprintf("Waiting for redirect... (%ds)", (i+1)*2))
+			}
+			chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
+		}
+	}
 
 	// If we captured the code, return it
 	if oauthCode != "" {
+		if progress != nil {
+			progress("Authentication successful!")
+		}
 		return oauthCode, nil
 	}
 

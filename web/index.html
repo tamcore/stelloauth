@@ -244,6 +244,8 @@ async function startOAuth() {
     password: document.getElementById('password').value
   };
 
+  let completed = false;
+
   try {
     const response = await fetch('/oauth', {
       method: 'POST',
@@ -253,6 +255,15 @@ async function startOAuth() {
       },
       body: JSON.stringify(payload)
     });
+
+    if (!response.ok) {
+      const data = await response.json();
+      box.className = 'alert-error';
+      box.innerText = 'Error: ' + (data.message || 'Request failed');
+      btn.disabled = false;
+      btn.innerText = 'Get OAuth Code';
+      return;
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -273,19 +284,24 @@ async function startOAuth() {
             } else if (data.type === 'error') {
               box.className = 'alert-error';
               box.innerText = 'Error: ' + data.message;
+              completed = true;
             } else if (data.type === 'success') {
               box.className = 'alert-success';
               box.innerText = 'OAuth Code:\n' + data.code;
               lastCode = data.code;
               copyBtn.classList.add('visible');
+              completed = true;
             }
           } catch (e) {}
         }
       }
     }
   } catch (e) {
-    box.className = 'alert-error';
-    box.innerText = 'Request failed: ' + e.message;
+    // Only show error if we didn't already complete successfully
+    if (!completed) {
+      box.className = 'alert-error';
+      box.innerText = 'Request failed: ' + e.message;
+    }
   }
 
   btn.disabled = false;
