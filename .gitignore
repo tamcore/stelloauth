@@ -1,5 +1,5 @@
 # Binaries
-stelloauth
+/stelloauth
 *.exe
 *.exe~
 *.dll
