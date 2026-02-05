@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
-	"embed"
+	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -17,11 +16,13 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-//go:embed web/*
-var webFS embed.FS
+//go:embed web/index.html
+var indexHTML []byte
+
+//go:embed configs.json
+var configsJSON []byte
 
 const (
-	configsURL     = "https://raw.githubusercontent.com/andreadegiovine/homeassistant-stellantis-vehicles/develop/custom_components/stellantis_vehicles/configs.json"
 	defaultPort    = "8080"
 	defaultAddress = "0.0.0.0"
 )
@@ -82,26 +83,13 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := webFS.ReadFile("web/index.html")
-	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Write(indexHTML)
 }
 
 func handleConfigs(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Get(configsURL)
-	if err != nil {
-		http.Error(w, "Failed to fetch configs", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
 	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
+	w.Write(configsJSON)
 }
 
 func handleOAuth(w http.ResponseWriter, r *http.Request) {
@@ -131,15 +119,9 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func performOAuth(req OAuthRequest) (string, error) {
-	// Fetch configs
-	resp, err := http.Get(configsURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch configs: %v", err)
-	}
-	defer resp.Body.Close()
-
+	// Parse embedded configs
 	var configs map[string]BrandConfig
-	if err := json.NewDecoder(resp.Body).Decode(&configs); err != nil {
+	if err := json.Unmarshal(configsJSON, &configs); err != nil {
 		return "", fmt.Errorf("failed to parse configs: %v", err)
 	}
 
