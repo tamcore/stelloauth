@@ -109,7 +109,13 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, err := performOAuth(req)
+	// Check if client accepts SSE
+	if r.Header.Get("Accept") == "text/event-stream" {
+		handleOAuthSSE(w, req)
+		return
+	}
+
+	code, err := performOAuth(req, nil)
 	if err != nil {
 		sendError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -118,7 +124,40 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, code)
 }
 
-func performOAuth(req OAuthRequest) (string, error) {
+func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		sendError(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	progress := func(step string) {
+		fmt.Fprintf(w, "data: {\"type\":\"progress\",\"message\":\"%s\"}\n\n", step)
+		flusher.Flush()
+	}
+
+	code, err := performOAuth(req, progress)
+	if err != nil {
+		fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", err.Error())
+		flusher.Flush()
+		return
+	}
+
+	fmt.Fprintf(w, "data: {\"type\":\"success\",\"code\":\"%s\"}\n\n", code)
+	flusher.Flush()
+}
+
+type ProgressFunc func(step string)
+
+func performOAuth(req OAuthRequest, progress ProgressFunc) (string, error) {
+	if progress != nil {
+		progress("Preparing authentication...")
+	}
+
 	// Parse embedded configs
 	var configs map[string]BrandConfig
 	if err := json.Unmarshal(configsJSON, &configs); err != nil {
@@ -145,10 +184,9 @@ func performOAuth(req OAuthRequest) (string, error) {
 	)
 
 	log.Printf("Starting OAuth flow for %s/%s", req.Brand, req.Country)
-	log.Printf("Auth URL: %s", authURL)
 
 	// Use chromedp to automate the login flow
-	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme)
+	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme, progress)
 	if err != nil {
 		return "", err
 	}
@@ -156,7 +194,11 @@ func performOAuth(req OAuthRequest) (string, error) {
 	return code, nil
 }
 
-func performChromedpOAuth(authURL, email, password, scheme string) (string, error) {
+func performChromedpOAuth(authURL, email, password, scheme string, progress ProgressFunc) (string, error) {
+	if progress != nil {
+		progress("Starting browser...")
+	}
+
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -214,7 +256,9 @@ func performChromedpOAuth(authURL, email, password, scheme string) (string, erro
 	)
 
 	// Run the OAuth flow
-	log.Printf("Navigating to auth URL...")
+	if progress != nil {
+		progress("Loading login page...")
+	}
 	err := chromedp.Run(browserCtx,
 		network.Enable(),
 		chromedp.Navigate(authURL),
@@ -225,7 +269,9 @@ func performChromedpOAuth(authURL, email, password, scheme string) (string, erro
 	}
 
 	// Wait for the Gigya login form to appear
-	log.Printf("Waiting for login form...")
+	if progress != nil {
+		progress("Waiting for login form...")
+	}
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(emailSelector, chromedp.ByQuery),
 	)
@@ -241,7 +287,9 @@ func performChromedpOAuth(authURL, email, password, scheme string) (string, erro
 	}
 
 	// Fill in credentials using SetValue (more reliable for SPAs)
-	log.Printf("Filling credentials...")
+	if progress != nil {
+		progress("Entering credentials...")
+	}
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(passwordSelector, chromedp.ByQuery),
 		chromedp.SetValue(emailSelector, email, chromedp.ByQuery),
@@ -253,7 +301,9 @@ func performChromedpOAuth(authURL, email, password, scheme string) (string, erro
 	}
 
 	// Submit login form using Click
-	log.Printf("Submitting login form...")
+	if progress != nil {
+		progress("Submitting login...")
+	}
 	err = chromedp.Run(browserCtx,
 		chromedp.Click(submitSelector, chromedp.ByQuery),
 		chromedp.Sleep(5*time.Second),
@@ -264,6 +314,9 @@ func performChromedpOAuth(authURL, email, password, scheme string) (string, erro
 
 	// Check if we captured the code already (direct redirect)
 	if oauthCode != "" {
+		if progress != nil {
+			progress("Authentication successful!")
+		}
 		return oauthCode, nil
 	}
 
@@ -285,13 +338,17 @@ func performChromedpOAuth(authURL, email, password, scheme string) (string, erro
 	}
 
 	// Wait for authorization confirmation page (if present)
-	log.Printf("Checking for authorization form...")
+	if progress != nil {
+		progress("Waiting for authorization...")
+	}
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(authorizeSelector, chromedp.ByQuery),
 	)
 	if err == nil {
 		// Found authorize form, click it
-		log.Printf("Clicking authorize button...")
+		if progress != nil {
+			progress("Confirming authorization...")
+		}
 		chromedp.Run(browserCtx,
 			chromedp.Click(authorizeSelector, chromedp.ByQuery),
 			chromedp.Sleep(3*time.Second),
