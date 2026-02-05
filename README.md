@@ -12,6 +12,12 @@ This tool helps you obtain the OAuth authorization code required for vehicle int
 - ✅ Single binary with embedded web UI
 - ✅ Docker container available
 
+## Requirements
+
+The application uses headless Chrome (via chromedp) to automate the OAuth flow. Chrome/Chromium must be installed on the system.
+
+When running in Docker, Chrome is included in the container image.
+
 ## Usage
 
 ### Docker (Recommended)
@@ -32,6 +38,8 @@ Download the latest release from the [releases page](https://github.com/tamcore/
 
 The server starts on port 8080 by default.
 
+**Note:** You need Chrome/Chromium installed on your system for the binary to work.
+
 ## Configuration
 
 | Environment Variable | Default   | Description              |
@@ -44,7 +52,8 @@ The server starts on port 8080 by default.
 1. Select your brand (e.g., MyPeugeot) and country
 2. Enter your Stellantis account credentials
 3. Click "Get OAuth Code"
-4. Copy the OAuth code for use with your integration
+4. The server automates the login flow using headless Chrome
+5. Copy the OAuth code for use with your integration
 
 Your credentials are only used to authenticate with Stellantis servers and are never stored.
 
