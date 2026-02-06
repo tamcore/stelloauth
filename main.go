@@ -346,6 +346,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	// Create chromedp options for headless browser
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
+		chromedp.Flag("incognito", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
