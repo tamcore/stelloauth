@@ -14,6 +14,7 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/google/uuid"
 )
 
 //go:embed web/index.html
@@ -92,6 +93,20 @@ func handleConfigs(w http.ResponseWriter, r *http.Request) {
 	w.Write(configsJSON)
 }
 
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header first (for reverse proxies)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	// Check X-Real-IP header
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// Fall back to RemoteAddr
+	return r.RemoteAddr
+}
+
 func handleOAuth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -109,22 +124,30 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate request ID and get client IP
+	requestID := uuid.New().String()
+	clientIP := getClientIP(r)
+
+	log.Printf("[%s] OAuth request from %s for user %s (%s/%s)", requestID, clientIP, req.Email, req.Brand, req.Country)
+
 	// Check if client accepts SSE
 	if r.Header.Get("Accept") == "text/event-stream" {
-		handleOAuthSSE(w, req)
+		handleOAuthSSE(w, req, requestID)
 		return
 	}
 
-	code, err := performOAuth(req, nil, nil)
+	code, err := performOAuth(req, requestID, nil, nil)
 	if err != nil {
+		log.Printf("[%s] OAuth failed: %s", requestID, err.Error())
 		sendError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("[%s] OAuth successful", requestID)
 	sendSuccess(w, code)
 }
 
-func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest) {
+func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest, requestID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		sendError(w, "SSE not supported", http.StatusInternalServerError)
@@ -147,13 +170,15 @@ func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest) {
 		flusher.Flush()
 	}
 
-	code, err := performOAuth(req, progress, debug)
+	code, err := performOAuth(req, requestID, progress, debug)
 	if err != nil {
+		log.Printf("[%s] OAuth failed: %s", requestID, err.Error())
 		fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
 
+	log.Printf("[%s] OAuth successful", requestID)
 	fmt.Fprintf(w, "data: {\"type\":\"success\",\"code\":\"%s\"}\n\n", code)
 	flusher.Flush()
 }
@@ -161,7 +186,7 @@ func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest) {
 type ProgressFunc func(step string)
 type DebugFunc func(msg string)
 
-func performOAuth(req OAuthRequest, progress ProgressFunc, debug DebugFunc) (string, error) {
+func performOAuth(req OAuthRequest, requestID string, progress ProgressFunc, debug DebugFunc) (string, error) {
 	if progress != nil {
 		progress("Preparing authentication...")
 	}
@@ -191,10 +216,10 @@ func performOAuth(req OAuthRequest, progress ProgressFunc, debug DebugFunc) (str
 		countryConfig.Locale,
 	)
 
-	log.Printf("Starting OAuth flow for %s/%s", req.Brand, req.Country)
+	log.Printf("[%s] Starting OAuth flow for %s/%s", requestID, req.Brand, req.Country)
 
 	// Use chromedp to automate the login flow
-	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme, progress, debug)
+	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme, requestID, progress, debug)
 	if err != nil {
 		return "", err
 	}
@@ -202,7 +227,7 @@ func performOAuth(req OAuthRequest, progress ProgressFunc, debug DebugFunc) (str
 	return code, nil
 }
 
-func performChromedpOAuth(authURL, email, password, scheme string, progress ProgressFunc, debug DebugFunc) (string, error) {
+func performChromedpOAuth(authURL, email, password, scheme, requestID string, progress ProgressFunc, debug DebugFunc) (string, error) {
 	if progress != nil {
 		progress("Starting browser...")
 	}
@@ -239,7 +264,7 @@ func performChromedpOAuth(authURL, email, password, scheme string, progress Prog
 		case *network.EventRequestWillBeSent:
 			reqURL := e.Request.URL
 			// Log all requests for debugging
-			log.Printf("Fetching: %s", reqURL)
+			log.Printf("[%s] Fetching: %s", requestID, reqURL)
 			if debug != nil {
 				debug(fmt.Sprintf("Fetching: %s", reqURL))
 			}
@@ -248,14 +273,14 @@ func performChromedpOAuth(authURL, email, password, scheme string, progress Prog
 				if err == nil {
 					if code := parsed.Query().Get("code"); code != "" {
 						oauthCode = code
-						log.Printf("Captured OAuth code from redirect request")
+						log.Printf("[%s] Captured OAuth code from redirect request", requestID)
 					}
 				}
 			}
 		case *network.EventLoadingFailed:
 			// Also catch failed loads for the custom scheme
 			if oauthCode == "" {
-				log.Printf("Network loading failed: %s", e.ErrorText)
+				log.Printf("[%s] Network loading failed: %s", requestID, e.ErrorText)
 			}
 		}
 	})
