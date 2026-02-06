@@ -365,17 +365,28 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	var oauthCode string
 	redirectPrefix := scheme + "://"
 
+	// Domains relevant to the OAuth flow (for debug output filtering)
+	relevantDomains := []string{
+		"stellantis.com", "gigya.com",
+		"peugeot.com", "citroen.com", "opel.com", "vauxhall.com", "dsautomobiles.com",
+	}
+	isRelevantURL := func(u string) bool {
+		for _, domain := range relevantDomains {
+			if strings.Contains(u, domain) {
+				return true
+			}
+		}
+		return false
+	}
+
 	// Set up listener for network events to catch the redirect (which fails because browser can't load custom schemes)
 	chromedp.ListenTarget(browserCtx, func(ev interface{}) {
 		switch e := ev.(type) {
 		case *network.EventRequestWillBeSent:
 			reqURL := e.Request.URL
-			// Log all requests for debugging
-			log.Printf("[%s] Fetching: %s", requestID, reqURL)
-			if debug != nil {
-				debug(fmt.Sprintf("Fetching: %s", reqURL))
-			}
+			// Capture OAuth redirect
 			if strings.HasPrefix(reqURL, redirectPrefix) {
+				log.Printf("[%s] Redirect URL: %s", requestID, reqURL)
 				parsed, err := url.Parse(reqURL)
 				if err == nil {
 					if code := parsed.Query().Get("code"); code != "" {
@@ -383,11 +394,9 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 						log.Printf("[%s] Captured OAuth code from redirect request", requestID)
 					}
 				}
-			}
-		case *network.EventLoadingFailed:
-			// Also catch failed loads for the custom scheme
-			if oauthCode == "" {
-				log.Printf("[%s] Network loading failed: %s", requestID, e.ErrorText)
+			} else if debug != nil && isRelevantURL(reqURL) {
+				// Only show relevant OAuth flow URLs in debug output
+				debug(fmt.Sprintf("Fetching: %s", reqURL))
 			}
 		}
 	})
