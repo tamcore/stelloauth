@@ -9,6 +9,10 @@ permissions:
   contents: write
   packages: write
 
+env:
+  CHART_DIR: charts/stelloauth
+  CHART_REPOSITORY: ghcr.io/${{ github.repository_owner }}/charts
+
 jobs:
   test:
     uses: ./.github/workflows/ci-checks.yaml
@@ -46,3 +50,55 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  helm-release:
+    name: Helm Chart Release
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Login to registry
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | \
+            helm registry login \
+              -u '${{ github.actor }}' \
+              --password-stdin \
+              ghcr.io
+
+      - name: Update Chart version
+        env:
+          VERSION: "${{ github.ref_name }}"
+        run: |
+          yq -i '.version = strenv(VERSION)' '${{ env.CHART_DIR }}/Chart.yaml'
+          yq -i '.appVersion = strenv(VERSION)' '${{ env.CHART_DIR }}/Chart.yaml'
+
+      - name: Package chart
+        run: |
+          echo PACKAGE=$(helm package ${{ env.CHART_DIR }} -u | cut -d " " -f 8) >> ${GITHUB_ENV}
+
+      - name: Push chart to OCI registry
+        run: |
+          helm push \
+            ${{ env.PACKAGE }} \
+            oci://${{ env.CHART_REPOSITORY }}
+
+      - name: Template chart for install.yaml
+        run: |
+          helm template \
+            ${GITHUB_REPOSITORY#*/} \
+            ${{ env.CHART_DIR }} > install.yaml
+
+      - name: Upload artifacts to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: "{install.yaml,${{ env.PACKAGE }}}"
+          file_glob: true
+          tag: ${{ github.ref }}
