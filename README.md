@@ -20,9 +20,25 @@ The application uses headless Chrome (via chromedp) to automate the OAuth flow. 
 
 When running in Docker, Chrome is included in the container image.
 
-## Usage
+## Installation
 
-### Docker (Recommended)
+### Helm Chart
+
+A helm chart is available in the [charts](charts/stelloauth) directory.
+
+```shell
+# fetch available chart versions
+crane ls ghcr.io/tamcore/charts/stelloauth
+
+# deploy
+helm upgrade --install \
+    stelloauth \
+    oci://ghcr.io/tamcore/charts/stelloauth \
+    --version ${CHART_VERSION} \
+    --namespace ${NAMESPACE}
+```
+
+### Docker
 
 ```bash
 docker run -p 8080:8080 ghcr.io/tamcore/stelloauth:latest
