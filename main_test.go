@@ -4,9 +4,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	// Initialize rate limiter for tests (disabled)
+	initRateLimiter()
+	os.Exit(m.Run())
+}
 
 func TestHandleIndex(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

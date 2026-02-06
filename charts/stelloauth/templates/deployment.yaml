@@ -34,19 +34,27 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
-          {{- with .Values.env }}
           env:
-            {{- range $key, $value := . }}
+            {{- if .Values.rateLimit.enabled }}
+            - name: RATE_LIMIT_COUNT
+              value: {{ .Values.rateLimit.count | quote }}
+            - name: RATE_LIMIT_DURATION
+              value: {{ .Values.rateLimit.duration | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-          {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -27,6 +29,99 @@ const (
 	defaultPort    = "8080"
 	defaultAddress = "0.0.0.0"
 )
+
+// RateLimiter tracks request counts per IP
+type RateLimiter struct {
+	mu       sync.Mutex
+	requests map[string][]time.Time
+	limit    int
+	window   time.Duration
+	enabled  bool
+}
+
+var rateLimiter *RateLimiter
+
+func initRateLimiter() {
+	limitStr := os.Getenv("RATE_LIMIT_COUNT")
+	durationStr := os.Getenv("RATE_LIMIT_DURATION")
+
+	if limitStr == "" || durationStr == "" {
+		log.Printf("Rate limiting disabled (RATE_LIMIT_COUNT and RATE_LIMIT_DURATION not set)")
+		rateLimiter = &RateLimiter{enabled: false}
+		return
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		log.Printf("Invalid RATE_LIMIT_COUNT, rate limiting disabled")
+		rateLimiter = &RateLimiter{enabled: false}
+		return
+	}
+
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil || duration <= 0 {
+		log.Printf("Invalid RATE_LIMIT_DURATION, rate limiting disabled")
+		rateLimiter = &RateLimiter{enabled: false}
+		return
+	}
+
+	log.Printf("Rate limiting enabled: %d requests per %s", limit, duration)
+	rateLimiter = &RateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   duration,
+		enabled:  true,
+	}
+}
+
+func (rl *RateLimiter) isAllowed(ip string) bool {
+	if !rl.enabled {
+		return true
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Filter out old requests
+	var valid []time.Time
+	for _, t := range rl.requests[ip] {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+
+	if len(valid) >= rl.limit {
+		rl.requests[ip] = valid
+		return false
+	}
+
+	rl.requests[ip] = append(valid, now)
+	return true
+}
+
+func (rl *RateLimiter) remaining(ip string) int {
+	if !rl.enabled {
+		return -1
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	var count int
+	for _, t := range rl.requests[ip] {
+		if t.After(cutoff) {
+			count++
+		}
+	}
+
+	return rl.limit - count
+}
 
 type OAuthRequest struct {
 	Brand    string `json:"brand"`
@@ -61,6 +156,8 @@ type CountryConfig struct {
 func main() {
 	port := getEnv("PORT", defaultPort)
 	address := getEnv("HTTP_ADDRESS", defaultAddress)
+
+	initRateLimiter()
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/configs", handleConfigs)
@@ -113,6 +210,17 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get client IP early for rate limiting
+	clientIP := getClientIP(r)
+
+	// Check rate limit
+	if !rateLimiter.isAllowed(clientIP) {
+		remaining := rateLimiter.remaining(clientIP)
+		log.Printf("Rate limit exceeded for %s (remaining: %d)", clientIP, remaining)
+		sendError(w, fmt.Sprintf("Rate limit exceeded. Try again later."), http.StatusTooManyRequests)
+		return
+	}
+
 	var req OAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, "Invalid request body", http.StatusBadRequest)
@@ -124,9 +232,8 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate request ID and get client IP
+	// Generate request ID
 	requestID := uuid.New().String()
-	clientIP := getClientIP(r)
 
 	log.Printf("[%s] OAuth request from %s for user %s (%s/%s)", requestID, clientIP, req.Email, req.Brand, req.Country)
 
@@ -287,9 +394,9 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 
 	// Selectors for Gigya login form (used by Stellantis)
 	const (
-		emailSelector    = `#gigya-login-form input[name="username"]`
-		passwordSelector = `#gigya-login-form input[name="password"]`
-		submitSelector   = `#gigya-login-form input[type="submit"]`
+		emailSelector     = `#gigya-login-form input[name="username"]`
+		passwordSelector  = `#gigya-login-form input[name="password"]`
+		submitSelector    = `#gigya-login-form input[type="submit"]`
 		authorizeSelector = `#cvs_from input[type="submit"]`
 	)
 

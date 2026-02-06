@@ -4,6 +4,7 @@ image:
   repository: ghcr.io/tamcore/stelloauth
   pullPolicy: IfNotPresent
   tag: ""
+  digest: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -38,6 +39,11 @@ ingress:
   tls: []
 
 resources: {}
+
+rateLimit:
+  enabled: false
+  count: 3
+  duration: "24h"
 
 livenessProbe:
   httpGet:
