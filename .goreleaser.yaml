@@ -49,7 +49,7 @@ dockers_v2:
   - images:
       - "ghcr.io/tamcore/stelloauth"
     tags:
-      - "{{ .Version }}"
+      - "{{ .Tag }}"
       - "latest"
     labels:
       "org.opencontainers.image.description": "Stellantis OAuth Helper"

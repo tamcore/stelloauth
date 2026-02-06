@@ -5,7 +5,8 @@ FROM chromedp/headless-shell:latest
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from goreleaser build context
-COPY stelloauth /usr/local/bin/stelloauth
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/stelloauth /usr/local/bin/stelloauth
 
 # Expose port
 EXPOSE 8080
