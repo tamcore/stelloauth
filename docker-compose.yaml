@@ -1,6 +1,9 @@
 services:
   stelloauth:
     image: ghcr.io/tamcore/stelloauth:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.dev
     ports:
       - "8080:8080"
     environment:
