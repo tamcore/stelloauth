@@ -106,6 +106,9 @@ go test -v ./...
 
 # Build with goreleaser
 goreleaser build --single-target --snapshot --clean
+
+# Build Docker image locally
+docker build -f Dockerfile.dev -t stelloauth .
 ```
 
 ## License
