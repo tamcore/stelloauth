@@ -45,36 +45,16 @@ changelog:
       - "^test:"
       - "^chore:"
 
-dockers:
-  - id: docker-amd64
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-amd64"
-      - "ghcr.io/tamcore/stelloauth:latest-amd64"
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - "--platform=linux/amd64"
-  - id: docker-arm64
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-arm64"
-      - "ghcr.io/tamcore/stelloauth:latest-arm64"
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - "--platform=linux/arm64"
-
-docker_manifests:
-  - name_template: "ghcr.io/tamcore/stelloauth:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-amd64"
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/tamcore/stelloauth:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-amd64"
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/tamcore/stelloauth:latest"
-    image_templates:
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-amd64"
-      - "ghcr.io/tamcore/stelloauth:{{ .Version }}-arm64"
+dockers_v2:
+  - images:
+      - "ghcr.io/tamcore/stelloauth"
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    labels:
+      "org.opencontainers.image.description": "Stellantis OAuth Helper"
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.name": "{{ .ProjectName }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
