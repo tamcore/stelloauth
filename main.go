@@ -394,11 +394,25 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 
 	// Selectors for Gigya login form (used by Stellantis)
 	const (
-		emailSelector     = `#gigya-login-form input[name="username"]`
-		passwordSelector  = `#gigya-login-form input[name="password"]`
-		submitSelector    = `#gigya-login-form input[type="submit"]`
-		authorizeSelector = `#cvs_from input[type="submit"]`
+		emailSelector    = `#gigya-login-form input[name="username"]`
+		passwordSelector = `#gigya-login-form input[name="password"]`
+		submitSelector   = `#gigya-login-form input[type="submit"]`
 	)
+
+	// Possible authorization form selectors (different pages use different forms)
+	// Order matters - more specific selectors first
+	// ForgeRock AM uses name="decision" with value="allow" or name="allow"
+	authorizeSelectors := []string{
+		`input[name="decision"][value="allow"]`,
+		`button[name="decision"][value="allow"]`,
+		`#allow`,
+		`input[name="allow"]`,
+		`button[name="allow"]`,
+		`input[type="submit"][value="Allow"]`,
+		`input[type="submit"][value="Erlauben"]`,  // German
+		`input[type="submit"][value="Autoriser"]`, // French
+		`#cvs_from input[type="submit"]`,
+	}
 
 	// Run the OAuth flow
 	if progress != nil {
@@ -493,18 +507,35 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	if progress != nil {
 		progress("Checking for authorization page...")
 	}
-	err = chromedp.Run(browserCtx,
-		chromedp.WaitVisible(authorizeSelector, chromedp.ByQuery),
-	)
-	if err == nil {
-		// Found authorize form, click it
-		if progress != nil {
-			progress("Confirming authorization...")
-		}
-		_ = chromedp.Run(browserCtx,
-			chromedp.Click(authorizeSelector, chromedp.ByQuery),
-		)
 
+	// Give the page time to render
+	_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
+
+	// Try each authorize selector with a short timeout
+	var authorizeFound bool
+	for _, selector := range authorizeSelectors {
+		// Create a short timeout context for checking each selector
+		checkCtx, checkCancel := context.WithTimeout(browserCtx, 3*time.Second)
+		err = chromedp.Run(checkCtx,
+			chromedp.WaitVisible(selector, chromedp.ByQuery),
+		)
+		checkCancel()
+
+		if err == nil {
+			authorizeFound = true
+			// Found authorize form, click it
+			if progress != nil {
+				progress("Confirming authorization...")
+			}
+			log.Printf("[%s] Found authorize button with selector: %s", requestID, selector)
+			_ = chromedp.Run(browserCtx,
+				chromedp.Click(selector, chromedp.ByQuery),
+			)
+			break
+		}
+	}
+
+	if authorizeFound {
 		// Wait for redirect with periodic updates
 		for i := 0; i < 5; i++ {
 			if oauthCode != "" {

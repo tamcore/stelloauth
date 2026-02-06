@@ -1,0 +1,14 @@
+export OPEL_DE_USERNAME=john.doe@example.com
+export OPEL_DE_PASSWORD=supersecurepassword
+
+export PEUGEOT_DE_USERNAME=john.doe@example.com
+export PEUGEOT_DE_PASSWORD=supersecurepassword
+
+export VAUXHALL_GB_USERNAME=john.doe@example.com
+export VAUXHALL_GB_PASSWORD=supersecurepassword
+
+export CITROEN_DE_USERNAME=john.doe@example.com
+export CITROEN_DE_PASSWORD=supersecurepassword
+
+export MYDS_DE_USERNAME=john.doe@example.com
+export MYDS_DE_PASSWORD=supersecurepassword
