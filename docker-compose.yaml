@@ -1,0 +1,14 @@
+services:
+  stelloauth:
+    image: ghcr.io/tamcore/stelloauth:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Optional: Configure rate limiting
+      # RATE_LIMIT_COUNT: "10"
+      # RATE_LIMIT_DURATION: "1h"
+      
+      # Optional: Change bind address/port
+      # HTTP_ADDRESS: "0.0.0.0"
+      # PORT: "8080"
+    restart: unless-stopped

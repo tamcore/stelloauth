@@ -30,6 +30,14 @@ docker run -p 8080:8080 ghcr.io/tamcore/stelloauth:latest
 
 Then open http://localhost:8080 in your browser.
 
+### Docker Compose
+
+```bash
+docker compose up -d
+```
+
+See [docker-compose.yaml](docker-compose.yaml) for the example configuration.
+
 ### Binary
 
 Download the latest release from the [releases page](https://github.com/tamcore/stelloauth/releases) and run:
