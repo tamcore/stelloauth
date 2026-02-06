@@ -4,12 +4,17 @@ set -euo pipefail
 # E2E test suite for stelloauth
 # Requires environment variables in format: {BRAND}_{COUNTRY}_USERNAME and {BRAND}_{COUNTRY}_PASSWORD
 # Example: OPEL_DE_USERNAME, OPEL_DE_PASSWORD
+#
+# Usage: ./e2e_test.sh [BRAND]
+#   BRAND: Optional filter (OPEL, PEUGEOT, CITROEN, MYDS, VAUXHALL)
+#   If not provided, runs all configured tests
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PORT="${PORT:-18080}"
 BASE_URL="http://localhost:${PORT}"
 PID_FILE="/tmp/stelloauth-e2e.pid"
+BRAND_FILTER="${1:-}"
 
 # Brand mapping from env var prefix to API brand name
 declare -A BRAND_MAP=(
@@ -114,6 +119,11 @@ run_all_tests() {
     # Collect all test cases first
     local test_cases=()
     for env_prefix in "${!BRAND_MAP[@]}"; do
+        # Skip if brand filter is set and doesn't match
+        if [[ -n "$BRAND_FILTER" && "${env_prefix^^}" != "${BRAND_FILTER^^}" ]]; then
+            continue
+        fi
+
         while IFS= read -r var; do
             if [[ "$var" =~ ^${env_prefix}_([A-Z]+)_USERNAME$ ]]; then
                 local country="${BASH_REMATCH[1]}"
@@ -121,6 +131,16 @@ run_all_tests() {
             fi
         done < <(env | grep "^${env_prefix}_" | cut -d= -f1 | sort -u)
     done
+
+    if [[ ${#test_cases[@]} -eq 0 ]]; then
+        if [[ -n "$BRAND_FILTER" ]]; then
+            echo "ERROR: No credentials found for brand: $BRAND_FILTER"
+            echo "Expected: ${BRAND_FILTER^^}_<COUNTRY>_USERNAME and ${BRAND_FILTER^^}_<COUNTRY>_PASSWORD"
+        else
+            echo "ERROR: No credentials found in environment"
+        fi
+        return 1
+    fi
 
     # Run each test
     for test_case in "${test_cases[@]}"; do
@@ -150,6 +170,9 @@ run_all_tests() {
 main() {
     echo "========================================"
     echo "Stelloauth E2E Test Suite"
+    if [[ -n "$BRAND_FILTER" ]]; then
+        echo "Filter: ${BRAND_FILTER^^}"
+    fi
     echo "========================================"
     echo ""
 
