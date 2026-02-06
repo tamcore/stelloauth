@@ -81,7 +81,7 @@ func TestHandleOAuth_MissingFields(t *testing.T) {
 	}
 
 	var resp OAuthResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 	if resp.Status != "error" {
 		t.Errorf("expected status 'error', got '%s'", resp.Status)
 	}

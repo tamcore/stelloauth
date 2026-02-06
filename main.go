@@ -182,12 +182,12 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexHTML)
+	_, _ = w.Write(indexHTML)
 }
 
 func handleConfigs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(configsJSON)
+	_, _ = w.Write(configsJSON)
 }
 
 func getClientIP(r *http.Request) string {
@@ -217,7 +217,7 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 	if !rateLimiter.isAllowed(clientIP) {
 		remaining := rateLimiter.remaining(clientIP)
 		log.Printf("Rate limit exceeded for %s (remaining: %d)", clientIP, remaining)
-		sendError(w, fmt.Sprintf("Rate limit exceeded. Try again later."), http.StatusTooManyRequests)
+		sendError(w, "Rate limit exceeded. Try again later.", http.StatusTooManyRequests)
 		return
 	}
 
@@ -266,27 +266,27 @@ func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest, requestID string) {
 	w.Header().Set("Connection", "keep-alive")
 
 	progress := func(step string) {
-		fmt.Fprintf(w, "data: {\"type\":\"progress\",\"message\":\"%s\"}\n\n", step)
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"progress\",\"message\":\"%s\"}\n\n", step)
 		flusher.Flush()
 	}
 
 	debug := func(msg string) {
 		// Escape quotes for JSON
 		escaped := strings.ReplaceAll(msg, "\"", "\\\"")
-		fmt.Fprintf(w, "data: {\"type\":\"debug\",\"message\":\"%s\"}\n\n", escaped)
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"debug\",\"message\":\"%s\"}\n\n", escaped)
 		flusher.Flush()
 	}
 
 	code, err := performOAuth(req, requestID, progress, debug)
 	if err != nil {
 		log.Printf("[%s] OAuth failed: %s", requestID, err.Error())
-		fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", err.Error())
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
 
 	log.Printf("[%s] OAuth successful", requestID)
-	fmt.Fprintf(w, "data: {\"type\":\"success\",\"code\":\"%s\"}\n\n", code)
+	_, _ = fmt.Fprintf(w, "data: {\"type\":\"success\",\"code\":\"%s\"}\n\n", code)
 	flusher.Flush()
 }
 
@@ -362,7 +362,6 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	defer browserCancel()
 
 	var oauthCode string
-	var authError string
 	redirectPrefix := scheme + "://"
 
 	// Set up listener for network events to catch the redirect (which fails because browser can't load custom schemes)
@@ -423,11 +422,8 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	if err != nil {
 		// Log what we see on the page
 		var pageHTML string
-		chromedp.Run(browserCtx, chromedp.OuterHTML("html", &pageHTML))
+		_ = chromedp.Run(browserCtx, chromedp.OuterHTML("html", &pageHTML))
 		log.Printf("Page HTML length: %d", len(pageHTML))
-		if strings.Contains(pageHTML, "error") || strings.Contains(pageHTML, "Error") {
-			authError = "login page error"
-		}
 		return "", fmt.Errorf("login form not found (timeout): %v", err)
 	}
 
@@ -464,7 +460,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 		if progress != nil && i > 0 {
 			progress(fmt.Sprintf("Processing login... (%ds)", i*2))
 		}
-		chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
+		_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 	}
 
 	// Check if we captured the code already (direct redirect)
@@ -477,7 +473,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 
 	// Check for login errors
 	var errorText string
-	chromedp.Run(browserCtx,
+	_ = chromedp.Run(browserCtx,
 		chromedp.Evaluate(`
 			(function() {
 				var error = document.querySelector('.gigya-error-msg, .error-message, [class*="error"]');
@@ -504,7 +500,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 		if progress != nil {
 			progress("Confirming authorization...")
 		}
-		chromedp.Run(browserCtx,
+		_ = chromedp.Run(browserCtx,
 			chromedp.Click(authorizeSelector, chromedp.ByQuery),
 		)
 
@@ -516,7 +512,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 			if progress != nil {
 				progress(fmt.Sprintf("Waiting for redirect... (%ds)", (i+1)*2))
 			}
-			chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
+			_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 		}
 	}
 
@@ -530,7 +526,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 
 	// Check current URL
 	var currentURL string
-	chromedp.Run(browserCtx, chromedp.Location(&currentURL))
+	_ = chromedp.Run(browserCtx, chromedp.Location(&currentURL))
 	log.Printf("Current URL: %s", currentURL)
 
 	if strings.HasPrefix(currentURL, redirectPrefix) {
@@ -542,17 +538,13 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 		}
 	}
 
-	if authError != "" {
-		return "", fmt.Errorf("authentication failed: %s", authError)
-	}
-
 	return "", fmt.Errorf("authentication failed - could not retrieve OAuth code")
 }
 
 func sendError(w http.ResponseWriter, message string, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(OAuthResponse{
+	_ = json.NewEncoder(w).Encode(OAuthResponse{
 		Status:  "error",
 		Message: message,
 	})
@@ -560,7 +552,7 @@ func sendError(w http.ResponseWriter, message string, statusCode int) {
 
 func sendSuccess(w http.ResponseWriter, code string) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(OAuthResponse{
+	_ = json.NewEncoder(w).Encode(OAuthResponse{
 		Status: "success",
 		Data: &OAuthData{
 			Code: code,
