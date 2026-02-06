@@ -2,7 +2,9 @@
 
 A web-based OAuth helper for Stellantis vehicles (MyPeugeot, MyCitroën, MyDS, MyOpel, MyVauxhall).
 
-This tool helps you obtain the OAuth authorization code required for vehicle integrations like the [Home Assistant Stellantis integration](https://github.com/andreadegiovine/homeassistant-stellantis-vehicles).
+This tool was specifically made to work with the [Home Assistant Stellantis Vehicles integration](https://github.com/andreadegiovine/homeassistant-stellantis-vehicles) and helps you obtain the OAuth authorization code required for the integration setup.
+
+Based on the work done in [stellantis-oauth-helper](https://github.com/benbox69/stellantis-oauth-helper) by benbox69.
 
 ## Features
 
