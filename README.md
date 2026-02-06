@@ -42,10 +42,22 @@ The server starts on port 8080 by default.
 
 ## Configuration
 
-| Environment Variable | Default   | Description              |
-|---------------------|-----------|--------------------------|
-| `PORT`              | `8080`    | HTTP server port         |
-| `HTTP_ADDRESS`      | `0.0.0.0` | Bind address             |
+| Environment Variable | Default   | Description                                      |
+|---------------------|-----------|--------------------------------------------------|
+| `PORT`              | `8080`    | HTTP server port                                 |
+| `HTTP_ADDRESS`      | `0.0.0.0` | Bind address                                     |
+| `RATE_LIMIT_COUNT`  | -         | Max requests per IP in the rate limit window     |
+| `RATE_LIMIT_DURATION` | -       | Rate limit window duration (e.g., `24h`, `1h30m`) |
+
+Rate limiting is disabled by default. Set both `RATE_LIMIT_COUNT` and `RATE_LIMIT_DURATION` to enable it.
+
+Example with rate limiting (3 requests per 24 hours):
+```bash
+docker run -p 8080:8080 \
+  -e RATE_LIMIT_COUNT=3 \
+  -e RATE_LIMIT_DURATION=24h \
+  ghcr.io/tamcore/stelloauth:latest
+```
 
 ## How It Works
 
