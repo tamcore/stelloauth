@@ -115,7 +115,7 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, err := performOAuth(req, nil)
+	code, err := performOAuth(req, nil, nil)
 	if err != nil {
 		sendError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -140,7 +140,14 @@ func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest) {
 		flusher.Flush()
 	}
 
-	code, err := performOAuth(req, progress)
+	debug := func(msg string) {
+		// Escape quotes for JSON
+		escaped := strings.ReplaceAll(msg, "\"", "\\\"")
+		fmt.Fprintf(w, "data: {\"type\":\"debug\",\"message\":\"%s\"}\n\n", escaped)
+		flusher.Flush()
+	}
+
+	code, err := performOAuth(req, progress, debug)
 	if err != nil {
 		fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", err.Error())
 		flusher.Flush()
@@ -152,8 +159,9 @@ func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest) {
 }
 
 type ProgressFunc func(step string)
+type DebugFunc func(msg string)
 
-func performOAuth(req OAuthRequest, progress ProgressFunc) (string, error) {
+func performOAuth(req OAuthRequest, progress ProgressFunc, debug DebugFunc) (string, error) {
 	if progress != nil {
 		progress("Preparing authentication...")
 	}
@@ -186,7 +194,7 @@ func performOAuth(req OAuthRequest, progress ProgressFunc) (string, error) {
 	log.Printf("Starting OAuth flow for %s/%s", req.Brand, req.Country)
 
 	// Use chromedp to automate the login flow
-	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme, progress)
+	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme, progress, debug)
 	if err != nil {
 		return "", err
 	}
@@ -194,7 +202,7 @@ func performOAuth(req OAuthRequest, progress ProgressFunc) (string, error) {
 	return code, nil
 }
 
-func performChromedpOAuth(authURL, email, password, scheme string, progress ProgressFunc) (string, error) {
+func performChromedpOAuth(authURL, email, password, scheme string, progress ProgressFunc, debug DebugFunc) (string, error) {
 	if progress != nil {
 		progress("Starting browser...")
 	}
@@ -230,6 +238,11 @@ func performChromedpOAuth(authURL, email, password, scheme string, progress Prog
 		switch e := ev.(type) {
 		case *network.EventRequestWillBeSent:
 			reqURL := e.Request.URL
+			// Log all requests for debugging
+			log.Printf("Fetching: %s", reqURL)
+			if debug != nil {
+				debug(fmt.Sprintf("Fetching: %s", reqURL))
+			}
 			if strings.HasPrefix(reqURL, redirectPrefix) {
 				parsed, err := url.Parse(reqURL)
 				if err == nil {

@@ -138,6 +138,20 @@ button:disabled {
   display: inline-block;
 }
 
+.debug-box {
+  margin-top: 12px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 footer {
   margin-top: 30px;
   text-align: center;
@@ -180,6 +194,9 @@ footer a:hover {
   <div class="section-title">Result</div>
   <div id="result">(waiting)</div>
   <button id="copyBtn" class="copy-btn" onclick="copyCode()">Copy Code</button>
+
+  <div class="section-title">Debug</div>
+  <div id="debug" class="debug-box">(no activity yet)</div>
 
   <footer>
     <a href="https://github.com/tamcore/stelloauth" target="_blank">View on GitHub</a>
@@ -229,12 +246,14 @@ async function startOAuth() {
   const btn = document.getElementById('submitBtn');
   const box = document.getElementById('result');
   const copyBtn = document.getElementById('copyBtn');
+  const debugBox = document.getElementById('debug');
   
   btn.disabled = true;
   btn.innerText = 'Processing...';
   box.className = 'alert-info';
   box.innerText = 'Starting...';
   copyBtn.classList.remove('visible');
+  debugBox.innerText = '';
   lastCode = '';
 
   const payload = {
@@ -281,6 +300,9 @@ async function startOAuth() {
             const data = JSON.parse(line.slice(6));
             if (data.type === 'progress') {
               box.innerText = data.message;
+            } else if (data.type === 'debug') {
+              debugBox.innerText += data.message + '\n';
+              debugBox.scrollTop = debugBox.scrollHeight;
             } else if (data.type === 'error') {
               box.className = 'alert-error';
               box.innerText = 'Error: ' + data.message;
