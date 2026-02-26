@@ -38,6 +38,16 @@ ingress:
           pathType: Prefix
   tls: []
 
+# Gateway API HTTPRoute — alternative to Ingress for clusters running nginx-gateway-fabric
+# or another Gateway API implementation.
+httpRoute:
+  enabled: false
+  parentRefs: []
+  #  - name: nginx-gateway
+  #    namespace: nginx-gateway
+  hostnames: []
+  #  - stelloauth.example.com
+
 resources: {}
 
 rateLimit:
