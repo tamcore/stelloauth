@@ -47,6 +47,15 @@ httpRoute:
   #    namespace: nginx-gateway
   hostnames: []
   #  - stelloauth.example.com
+  # Optional list of additional filters to inject into the HTTPRoute rule.
+  # Useful for implementation-specific features, e.g. an NGF SnippetsFilter
+  # for IP allowlisting or an ExtAuth filter for external authentication.
+  filters: []
+  #  - type: ExtensionRef
+  #    extensionRef:
+  #      group: gateway.nginx.org
+  #      kind: SnippetsFilter
+  #      name: stelloauth-ip-allowlist
 
 resources: {}
 
