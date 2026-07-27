@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,10 +31,16 @@ const (
 	defaultAddress = "0.0.0.0"
 )
 
+// maxExpiredRefunds bounds how many times a per-IP rate-limit charge is
+// refunded for transient "session expired" failures within one window, so the
+// refund can't be abused as an unlimited bypass.
+const maxExpiredRefunds = 2
+
 // RateLimiter tracks request counts per IP
 type RateLimiter struct {
 	mu       sync.Mutex
 	requests map[string][]time.Time
+	refunds  map[string][]time.Time
 	limit    int
 	window   time.Duration
 	enabled  bool
@@ -68,10 +75,55 @@ func initRateLimiter() {
 	log.Printf("Rate limiting enabled: %d requests per %s", limit, duration)
 	rateLimiter = &RateLimiter{
 		requests: make(map[string][]time.Time),
+		refunds:  make(map[string][]time.Time),
 		limit:    limit,
 		window:   duration,
 		enabled:  true,
 	}
+}
+
+// validInWindow returns the timestamps in ts that are newer than the current
+// window cutoff.
+func (rl *RateLimiter) validInWindow(ts []time.Time, now time.Time) []time.Time {
+	cutoff := now.Add(-rl.window)
+	var valid []time.Time
+	for _, t := range ts {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	return valid
+}
+
+// refund cancels the most recent recorded request for ip (a transient failure
+// that shouldn't count), up to maxExpiredRefunds times per window. Returns true
+// if a charge was refunded, false if disabled, nothing to refund, or the cap
+// was reached.
+func (rl *RateLimiter) refund(ip string) bool {
+	if !rl.enabled {
+		return false
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+
+	grantedRefunds := rl.validInWindow(rl.refunds[ip], now)
+	if len(grantedRefunds) >= maxExpiredRefunds {
+		rl.refunds[ip] = grantedRefunds
+		return false
+	}
+
+	reqs := rl.validInWindow(rl.requests[ip], now)
+	if len(reqs) == 0 {
+		rl.requests[ip] = reqs
+		return false
+	}
+
+	rl.requests[ip] = reqs[:len(reqs)-1]
+	rl.refunds[ip] = append(grantedRefunds, now)
+	return true
 }
 
 func (rl *RateLimiter) isAllowed(ip string) bool {
@@ -83,16 +135,7 @@ func (rl *RateLimiter) isAllowed(ip string) bool {
 	defer rl.mu.Unlock()
 
 	now := time.Now()
-	cutoff := now.Add(-rl.window)
-
-	// Filter out old requests
-	var valid []time.Time
-	for _, t := range rl.requests[ip] {
-		if t.After(cutoff) {
-			valid = append(valid, t)
-		}
-	}
-
+	valid := rl.validInWindow(rl.requests[ip], now)
 	if len(valid) >= rl.limit {
 		rl.requests[ip] = valid
 		return false
@@ -110,17 +153,7 @@ func (rl *RateLimiter) remaining(ip string) int {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
-	cutoff := now.Add(-rl.window)
-
-	var count int
-	for _, t := range rl.requests[ip] {
-		if t.After(cutoff) {
-			count++
-		}
-	}
-
-	return rl.limit - count
+	return rl.limit - len(rl.validInWindow(rl.requests[ip], time.Now()))
 }
 
 type OAuthRequest struct {
@@ -212,6 +245,14 @@ func getClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// refundIfExpired gives back the rate-limit charge when the OAuth attempt
+// failed with a transient "session expired" error (bounded by the limiter).
+func refundIfExpired(clientIP, requestID string, err error) {
+	if errors.Is(err, errSessionExpired) && rateLimiter.refund(clientIP) {
+		log.Printf("[%s] session expired — refunded rate-limit slot for %s", requestID, clientIP)
+	}
+}
+
 func handleOAuth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -247,12 +288,13 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 
 	// Check if client accepts SSE
 	if r.Header.Get("Accept") == "text/event-stream" {
-		handleOAuthSSE(w, req, requestID)
+		handleOAuthSSE(w, req, requestID, clientIP)
 		return
 	}
 
 	code, err := performOAuth(req, requestID, nil, nil)
 	if err != nil {
+		refundIfExpired(clientIP, requestID, err)
 		log.Printf("[%s] OAuth failed: %s", requestID, err.Error())
 		sendError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -262,7 +304,7 @@ func handleOAuth(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, code)
 }
 
-func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest, requestID string) {
+func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest, requestID, clientIP string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		sendError(w, "SSE not supported", http.StatusInternalServerError)
@@ -287,6 +329,7 @@ func handleOAuthSSE(w http.ResponseWriter, req OAuthRequest, requestID string) {
 
 	code, err := performOAuth(req, requestID, progress, debug)
 	if err != nil {
+		refundIfExpired(clientIP, requestID, err)
 		log.Printf("[%s] OAuth failed: %s", requestID, err.Error())
 		_, _ = fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":\"%s\"}\n\n", err.Error())
 		flusher.Flush()
@@ -562,6 +605,9 @@ func performChromedpOAuth(
 
 	// Surface a Stellantis error page (e.g. expired contextId) with a clear message.
 	if flowError != "" {
+		if flowError == msgSessionExpired {
+			return "", errSessionExpired
+		}
 		return "", fmt.Errorf("authentication failed: %s", flowError)
 	}
 
@@ -647,6 +693,14 @@ func startProgressHeartbeat(progress ProgressFunc) (setPhase func(string), stop 
 	return setPhase, func() { close(done); wg.Wait() }
 }
 
+// msgSessionExpired is the user-facing message for an expired Stellantis
+// consent contextId (login took too long). errSessionExpired is the sentinel
+// returned for that case so callers can distinguish it (e.g. to refund the
+// rate limit — it is a transient, not-the-user's-fault failure).
+const msgSessionExpired = "the login took too long and the session expired, please try again"
+
+var errSessionExpired = errors.New(msgSessionExpired)
+
 // friendlyOPError turns a Stellantis OPErrorPage.php code/message into a
 // user-facing error string. Stellantis encodes spaces as '+', so it is decoded
 // back to spaces; the expired-contextId case gets a clear retry hint.
@@ -654,7 +708,7 @@ func friendlyOPError(code, message string) string {
 	msg := strings.ReplaceAll(message, "+", " ")
 	lower := strings.ToLower(msg)
 	if strings.Contains(lower, "expired") || strings.Contains(lower, "took too long") {
-		return "the login took too long and the session expired, please try again"
+		return msgSessionExpired
 	}
 	if msg != "" {
 		return msg
