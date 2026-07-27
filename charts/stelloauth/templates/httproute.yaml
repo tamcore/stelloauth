@@ -16,8 +16,13 @@ spec:
     - backendRefs:
         - name: {{ include "stelloauth.fullname" . }}
           port: {{ .Values.service.port }}
-      {{- if .Values.httpRoute.filters }}
+      {{- $filters := .Values.httpRoute.filters | default list }}
+      {{- if .Values.httpRoute.sse }}
+      {{- $sseFilter := dict "type" "ExtensionRef" "extensionRef" (dict "group" "gateway.nginx.org" "kind" "SnippetsFilter" "name" (printf "%s-sse" (include "stelloauth.fullname" .))) }}
+      {{- $filters = prepend $filters $sseFilter }}
+      {{- end }}
+      {{- if $filters }}
       filters:
-        {{- toYaml .Values.httpRoute.filters | nindent 8 }}
+        {{- toYaml $filters | nindent 8 }}
       {{- end }}
 {{- end }}

@@ -157,6 +157,14 @@ func main() {
 	port := getEnv("PORT", defaultPort)
 	address := getEnv("HTTP_ADDRESS", defaultAddress)
 
+	if os.Getenv("CLOAK_CDP_URL") == "" {
+		log.Fatal("CLOAK_CDP_URL is required: set it to the CloakBrowser CDP endpoint (e.g. http://localhost:9222)")
+	}
+	sessionGate = newSessionGate(
+		getIntEnv("CLOAK_MAX_SESSIONS", 1),
+		getDurationEnv("CLOAK_QUEUE_TIMEOUT", 60*time.Second),
+	)
+
 	initRateLimiter()
 
 	http.HandleFunc("/", handleIndex)
@@ -316,7 +324,9 @@ func performOAuth(req OAuthRequest, requestID string, progress ProgressFunc, deb
 
 	// Build authorization URL
 	redirectURI := fmt.Sprintf("%s://oauth2redirect/%s", brandConfig.Scheme, strings.ToLower(req.Country))
-	authURL := fmt.Sprintf("%s/am/oauth2/authorize?client_id=%s&response_type=code&redirect_uri=%s&scope=openid%%20profile%%20email&locale=%s",
+	authURL := fmt.Sprintf(
+		"%s/am/oauth2/authorize?client_id=%s&response_type=code"+
+			"&redirect_uri=%s&scope=openid%%20profile%%20email&locale=%s",
 		brandConfig.OAuthURL,
 		countryConfig.ClientID,
 		url.QueryEscape(redirectURI),
@@ -334,28 +344,77 @@ func performOAuth(req OAuthRequest, requestID string, progress ProgressFunc, deb
 	return code, nil
 }
 
-func performChromedpOAuth(authURL, email, password, scheme, requestID string, progress ProgressFunc, debug DebugFunc) (string, error) {
-	if progress != nil {
-		progress("Starting browser...")
+func performChromedpOAuth(
+	authURL, email, password, scheme, requestID string,
+	progress ProgressFunc, debug DebugFunc,
+) (string, error) {
+	// Serialize browser use (CloakBrowser free tier = 1 session).
+	if err := sessionGate.Acquire(context.Background(), func() {
+		if progress != nil {
+			progress("Waiting for a free browser slot...")
+		}
+	}); err != nil {
+		if err == ErrSessionBusy {
+			return "", fmt.Errorf("service is busy, please try again in a few seconds")
+		}
+		return "", err
 	}
+	defer sessionGate.Release()
+
+	// Report real elapsed time. A single heartbeat goroutine is the sole writer
+	// of progress updates and ticks every second with the current phase label;
+	// the flow below only updates that label via setPhase. This keeps progress
+	// moving during the long blocking waits (page load, login) that would
+	// otherwise be silent, instead of a counter that caps at a few seconds.
+	flowStart := time.Now()
+	var phaseMu sync.Mutex
+	phaseLabel := "Starting browser"
+	setPhase := func(p string) {
+		phaseMu.Lock()
+		phaseLabel = p
+		phaseMu.Unlock()
+	}
+	stopHeartbeat := make(chan struct{})
+	var heartbeatWG sync.WaitGroup
+	if progress != nil {
+		heartbeatWG.Go(func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopHeartbeat:
+					return
+				case <-ticker.C:
+					phaseMu.Lock()
+					p := phaseLabel
+					phaseMu.Unlock()
+					progress(fmt.Sprintf("%s... (%ds)", p, int(time.Since(flowStart).Seconds())))
+				}
+			}
+		})
+	}
+	// Stop the heartbeat and wait for it to exit before returning, so it never
+	// writes concurrently with the final success/error event.
+	defer func() {
+		close(stopHeartbeat)
+		heartbeatWG.Wait()
+	}()
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	// Create chromedp options for headless browser
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
-		chromedp.Flag("incognito", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-background-networking", true),
-		chromedp.Flag("disable-extensions", true),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
+	// Connect to the CloakBrowser stealth-Chromium CDP endpoint. CloakBrowser
+	// owns the fingerprint, so we pass no Chrome flags of our own.
+	// Use the requestID as a unique fingerprint so each request gets an isolated
+	// CloakBrowser session (avoids state leaking/wedging between requests).
+	cdpURL := os.Getenv("CLOAK_CDP_URL")
+	wsURL, err := discoverCDPWebSocketURL(cdpURL, requestID, &http.Client{Timeout: 10 * time.Second})
+	if err != nil {
+		return "", fmt.Errorf("browser backend unavailable: %v", err)
+	}
 
-	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx, opts...)
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(ctx, wsURL)
 	defer allocCancel()
 
 	// Create browser context
@@ -380,7 +439,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	}
 
 	// Set up listener for network events to catch the redirect (which fails because browser can't load custom schemes)
-	chromedp.ListenTarget(browserCtx, func(ev interface{}) {
+	chromedp.ListenTarget(browserCtx, func(ev any) {
 		switch e := ev.(type) {
 		case *network.EventRequestWillBeSent:
 			reqURL := e.Request.URL
@@ -412,6 +471,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	// Order matters - more specific selectors first
 	// ForgeRock AM uses name="decision" with value="allow" or name="allow"
 	authorizeSelectors := []string{
+		`#consentbutton`, // DCR consent page ("CONTINUE") — post-login authorize
 		`input[name="decision"][value="allow"]`,
 		`button[name="decision"][value="allow"]`,
 		`#allow`,
@@ -424,10 +484,8 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	}
 
 	// Run the OAuth flow
-	if progress != nil {
-		progress("Loading login page...")
-	}
-	err := chromedp.Run(browserCtx,
+	setPhase("Loading login page")
+	err = chromedp.Run(browserCtx,
 		network.Enable(),
 		chromedp.Navigate(authURL),
 		chromedp.WaitReady("body"),
@@ -437,9 +495,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	}
 
 	// Wait for the Gigya login form to appear
-	if progress != nil {
-		progress("Waiting for login form...")
-	}
+	setPhase("Waiting for login form")
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(emailSelector, chromedp.ByQuery),
 	)
@@ -451,14 +507,19 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 		return "", fmt.Errorf("login form not found (timeout): %v", err)
 	}
 
-	// Fill in credentials using SetValue (more reliable for SPAs)
-	if progress != nil {
-		progress("Entering credentials...")
-	}
+	// Wait until the whole login form (incl. submit button) has rendered, then
+	// type credentials with real key events so Gigya's validation fires.
+	setPhase("Entering credentials")
+	// Type credentials with real key events (Gigya's validation and bot scoring
+	// need genuine input). SendKeys focuses the node itself, so no explicit Click
+	// (which fails with "not focusable" while the Gigya screenset is still
+	// wiring up). Settle briefly first for a cold browser.
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(passwordSelector, chromedp.ByQuery),
-		chromedp.SetValue(emailSelector, email, chromedp.ByQuery),
-		chromedp.SetValue(passwordSelector, password, chromedp.ByQuery),
+		chromedp.WaitVisible(submitSelector, chromedp.ByQuery),
+		chromedp.Sleep(1500*time.Millisecond),
+		chromedp.SendKeys(emailSelector, email, chromedp.ByQuery),
+		chromedp.SendKeys(passwordSelector, password, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
 	)
 	if err != nil {
@@ -466,9 +527,7 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	}
 
 	// Submit login form using Click
-	if progress != nil {
-		progress("Submitting login...")
-	}
+	setPhase("Signing in")
 	err = chromedp.Run(browserCtx,
 		chromedp.Click(submitSelector, chromedp.ByQuery),
 	)
@@ -476,22 +535,17 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 		return "", fmt.Errorf("failed to submit login: %v", err)
 	}
 
-	// Wait for response with periodic progress updates
-	for i := 0; i < 5; i++ {
+	// Grace period for a direct redirect (heartbeat reports elapsed time).
+	for range 5 {
 		if oauthCode != "" {
 			break
-		}
-		if progress != nil && i > 0 {
-			progress(fmt.Sprintf("Processing login... (%ds)", i*2))
 		}
 		_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 	}
 
 	// Check if we captured the code already (direct redirect)
 	if oauthCode != "" {
-		if progress != nil {
-			progress("Authentication successful!")
-		}
+		setPhase("Authentication successful")
 		return oauthCode, nil
 	}
 
@@ -513,55 +567,19 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	}
 
 	// Wait for authorization confirmation page (if present)
-	if progress != nil {
-		progress("Checking for authorization page...")
-	}
+	setPhase("Waiting for authorization")
 
 	// Give the page time to render
 	_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 
-	// Try each authorize selector with a short timeout
-	var authorizeFound bool
-	for _, selector := range authorizeSelectors {
-		// Create a short timeout context for checking each selector
-		checkCtx, checkCancel := context.WithTimeout(browserCtx, 3*time.Second)
-		err = chromedp.Run(checkCtx,
-			chromedp.WaitVisible(selector, chromedp.ByQuery),
-		)
-		checkCancel()
-
-		if err == nil {
-			authorizeFound = true
-			// Found authorize form, click it
-			if progress != nil {
-				progress("Confirming authorization...")
-			}
-			log.Printf("[%s] Found authorize button with selector: %s", requestID, selector)
-			_ = chromedp.Run(browserCtx,
-				chromedp.Click(selector, chromedp.ByQuery),
-			)
-			break
-		}
-	}
-
-	if authorizeFound {
-		// Wait for redirect with periodic updates
-		for i := 0; i < 5; i++ {
-			if oauthCode != "" {
-				break
-			}
-			if progress != nil {
-				progress(fmt.Sprintf("Waiting for redirect... (%ds)", (i+1)*2))
-			}
-			_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
-		}
-	}
+	// Handle the post-login authorization/consent page (if present) and wait
+	// for the resulting redirect.
+	clickAuthorizeAndWait(browserCtx, authorizeSelectors, requestID, setPhase,
+		func() bool { return oauthCode != "" })
 
 	// If we captured the code, return it
 	if oauthCode != "" {
-		if progress != nil {
-			progress("Authentication successful!")
-		}
+		setPhase("Authentication successful")
 		return oauthCode, nil
 	}
 
@@ -580,6 +598,42 @@ func performChromedpOAuth(authURL, email, password, scheme, requestID string, pr
 	}
 
 	return "", fmt.Errorf("authentication failed - could not retrieve OAuth code")
+}
+
+// clickAuthorizeAndWait looks for a post-login authorization/consent control
+// (trying each selector with a short timeout), clicks the first one found, and
+// then waits briefly for the OAuth redirect to be captured. codeSet reports
+// whether the redirect code has already arrived.
+func clickAuthorizeAndWait(
+	browserCtx context.Context, selectors []string, requestID string,
+	setPhase func(string), codeSet func() bool,
+) {
+	var authorizeFound bool
+	for _, selector := range selectors {
+		checkCtx, checkCancel := context.WithTimeout(browserCtx, 3*time.Second)
+		err := chromedp.Run(checkCtx, chromedp.WaitVisible(selector, chromedp.ByQuery))
+		checkCancel()
+
+		if err == nil {
+			authorizeFound = true
+			setPhase("Confirming authorization")
+			log.Printf("[%s] Found authorize button with selector: %s", requestID, selector)
+			_ = chromedp.Run(browserCtx, chromedp.Click(selector, chromedp.ByQuery))
+			break
+		}
+	}
+
+	if !authorizeFound {
+		return
+	}
+
+	setPhase("Waiting for redirect")
+	for range 5 {
+		if codeSet() {
+			break
+		}
+		_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
+	}
 }
 
 func sendError(w http.ResponseWriter, message string, statusCode int) {

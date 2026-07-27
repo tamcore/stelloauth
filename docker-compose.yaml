@@ -1,16 +1,28 @@
 services:
+  cloakbrowser:
+    image: cloakhq/cloakbrowser:0.5.2
+    command: ["cloakserve"]
+    restart: unless-stopped
+
   stelloauth:
     image: ghcr.io/tamcore/stelloauth:latest
     # build:
     #   context: .
     #   dockerfile: Dockerfile.dev
+    depends_on:
+      - cloakbrowser
     ports:
       - "8080:8080"
     environment:
+      CLOAK_CDP_URL: "http://cloakbrowser:9222"
+      # Optional: concurrency guard (defaults: 1 session, 60s queue wait)
+      # CLOAK_MAX_SESSIONS: "1"
+      # CLOAK_QUEUE_TIMEOUT: "60s"
+
       # Optional: Configure rate limiting
       # RATE_LIMIT_COUNT: "10"
       # RATE_LIMIT_DURATION: "1h"
-      
+
       # Optional: Change bind address/port
       # HTTP_ADDRESS: "0.0.0.0"
       # PORT: "8080"
