@@ -361,47 +361,16 @@ func performChromedpOAuth(
 	}
 	defer sessionGate.Release()
 
-	// Report real elapsed time. A single heartbeat goroutine is the sole writer
-	// of progress updates and ticks every second with the current phase label;
-	// the flow below only updates that label via setPhase. This keeps progress
-	// moving during the long blocking waits (page load, login) that would
-	// otherwise be silent, instead of a counter that caps at a few seconds.
-	flowStart := time.Now()
-	var phaseMu sync.Mutex
-	phaseLabel := "Starting browser"
-	setPhase := func(p string) {
-		phaseMu.Lock()
-		phaseLabel = p
-		phaseMu.Unlock()
-	}
-	stopHeartbeat := make(chan struct{})
-	var heartbeatWG sync.WaitGroup
-	if progress != nil {
-		heartbeatWG.Go(func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-stopHeartbeat:
-					return
-				case <-ticker.C:
-					phaseMu.Lock()
-					p := phaseLabel
-					phaseMu.Unlock()
-					progress(fmt.Sprintf("%s... (%ds)", p, int(time.Since(flowStart).Seconds())))
-				}
-			}
-		})
-	}
-	// Stop the heartbeat and wait for it to exit before returning, so it never
-	// writes concurrently with the final success/error event.
-	defer func() {
-		close(stopHeartbeat)
-		heartbeatWG.Wait()
-	}()
+	// Report real elapsed time via a heartbeat goroutine (the sole progress
+	// writer); the flow below only updates the phase label via setPhase. This
+	// keeps progress moving during the long blocking waits (page load, login)
+	// that would otherwise be silent.
+	setPhase, stopHeartbeat := startProgressHeartbeat(progress)
+	defer stopHeartbeat()
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// Create context with timeout. Some brands (e.g. Opel) are slow and a full
+	// login + consent can take ~2 minutes, so allow generous headroom.
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	// Connect to the CloakBrowser stealth-Chromium CDP endpoint. CloakBrowser
@@ -422,6 +391,7 @@ func performChromedpOAuth(
 	defer browserCancel()
 
 	var oauthCode string
+	var flowError string // captured Stellantis OPErrorPage.php error, if any
 	redirectPrefix := scheme + "://"
 
 	// Domains relevant to the OAuth flow (for debug output filtering)
@@ -452,6 +422,13 @@ func performChromedpOAuth(
 						oauthCode = code
 						log.Printf("[%s] Captured OAuth code from redirect request", requestID)
 					}
+				}
+			} else if strings.Contains(reqURL, "OPErrorPage.php") {
+				// Stellantis redirects here when the flow fails (e.g. an expired
+				// contextId when the login took too long).
+				if parsed, perr := url.Parse(reqURL); perr == nil {
+					flowError = friendlyOPError(parsed.Query().Get("code"), parsed.Query().Get("message"))
+					log.Printf("[%s] Stellantis error page: %s", requestID, reqURL)
 				}
 			} else if debug != nil && isRelevantURL(reqURL) {
 				// Only show relevant OAuth flow URLs in debug output
@@ -537,7 +514,7 @@ func performChromedpOAuth(
 
 	// Grace period for a direct redirect (heartbeat reports elapsed time).
 	for range 5 {
-		if oauthCode != "" {
+		if oauthCode != "" || flowError != "" {
 			break
 		}
 		_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
@@ -573,9 +550,9 @@ func performChromedpOAuth(
 	_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 
 	// Handle the post-login authorization/consent page (if present) and wait
-	// for the resulting redirect.
+	// for the resulting redirect (or an error page).
 	clickAuthorizeAndWait(browserCtx, authorizeSelectors, requestID, setPhase,
-		func() bool { return oauthCode != "" })
+		func() bool { return oauthCode != "" || flowError != "" })
 
 	// If we captured the code, return it
 	if oauthCode != "" {
@@ -583,18 +560,14 @@ func performChromedpOAuth(
 		return oauthCode, nil
 	}
 
-	// Check current URL
-	var currentURL string
-	_ = chromedp.Run(browserCtx, chromedp.Location(&currentURL))
-	log.Printf("Current URL: %s", currentURL)
+	// Surface a Stellantis error page (e.g. expired contextId) with a clear message.
+	if flowError != "" {
+		return "", fmt.Errorf("authentication failed: %s", flowError)
+	}
 
-	if strings.HasPrefix(currentURL, redirectPrefix) {
-		parsed, err := url.Parse(currentURL)
-		if err == nil {
-			if code := parsed.Query().Get("code"); code != "" {
-				return code, nil
-			}
-		}
+	// Last resort: the redirect may already be the current URL.
+	if code := codeFromLocation(browserCtx, redirectPrefix); code != "" {
+		return code, nil
 	}
 
 	return "", fmt.Errorf("authentication failed - could not retrieve OAuth code")
@@ -634,6 +607,78 @@ func clickAuthorizeAndWait(
 		}
 		_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 	}
+}
+
+// startProgressHeartbeat runs a goroutine that emits "<phase>... (Ns)" every
+// second (real elapsed time) until stop() is called. It is the sole progress
+// writer; callers change the reported phase via the returned setPhase. stop()
+// waits for the goroutine to exit so it never writes concurrently with a later
+// event. When progress is nil, setPhase is a no-op sink and stop() does nothing.
+func startProgressHeartbeat(progress ProgressFunc) (setPhase func(string), stop func()) {
+	var mu sync.Mutex
+	phase := "Starting browser"
+	setPhase = func(p string) {
+		mu.Lock()
+		phase = p
+		mu.Unlock()
+	}
+	if progress == nil {
+		return setPhase, func() {}
+	}
+
+	start := time.Now()
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				mu.Lock()
+				p := phase
+				mu.Unlock()
+				progress(fmt.Sprintf("%s... (%ds)", p, int(time.Since(start).Seconds())))
+			}
+		}
+	})
+	return setPhase, func() { close(done); wg.Wait() }
+}
+
+// friendlyOPError turns a Stellantis OPErrorPage.php code/message into a
+// user-facing error string. Stellantis encodes spaces as '+', so it is decoded
+// back to spaces; the expired-contextId case gets a clear retry hint.
+func friendlyOPError(code, message string) string {
+	msg := strings.ReplaceAll(message, "+", " ")
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "expired") || strings.Contains(lower, "took too long") {
+		return "the login took too long and the session expired, please try again"
+	}
+	if msg != "" {
+		return msg
+	}
+	if code != "" {
+		return "login failed (" + code + ")"
+	}
+	return "login failed"
+}
+
+// codeFromLocation returns the OAuth code if the current page URL is the
+// custom-scheme redirect carrying it, otherwise "".
+func codeFromLocation(browserCtx context.Context, redirectPrefix string) string {
+	var currentURL string
+	_ = chromedp.Run(browserCtx, chromedp.Location(&currentURL))
+	log.Printf("Current URL: %s", currentURL)
+	if !strings.HasPrefix(currentURL, redirectPrefix) {
+		return ""
+	}
+	parsed, err := url.Parse(currentURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Query().Get("code")
 }
 
 func sendError(w http.ResponseWriter, message string, statusCode int) {
