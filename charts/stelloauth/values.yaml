@@ -30,7 +30,14 @@ service:
 ingress:
   enabled: false
   className: ""
-  annotations: {}
+  # The /oauth endpoint streams progress over Server-Sent Events and a single
+  # login can take 60-120s. These nginx-ingress defaults stop the proxy from
+  # buffering the stream (which freezes progress) or cutting it at the default
+  # 60s timeout. Override for other ingress controllers.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
   hosts:
     - host: stelloauth.local
       paths:
@@ -42,6 +49,12 @@ ingress:
 # or another Gateway API implementation.
 httpRoute:
   enabled: false
+  # Inject an nginx-gateway-fabric SnippetsFilter so the /oauth SSE stream is not
+  # buffered or cut (NGF buffers responses and defaults to a 60s proxy timeout,
+  # which freezes progress and breaks logins longer than ~60s). Requires NGF
+  # started with `--snippets`. Set to false if your gateway handles this already.
+  sse: true
+  sseTimeout: "300s"
   parentRefs: []
   #  - name: nginx-gateway
   #    namespace: nginx-gateway
@@ -91,3 +104,21 @@ tolerations: []
 affinity: {}
 
 env: {}
+
+# CloakBrowser stealth-Chromium sidecar (drives the OAuth login, clears reCAPTCHA).
+cloakbrowser:
+  enabled: true
+  image:
+    repository: cloakhq/cloakbrowser
+    tag: "0.5.2"
+    pullPolicy: IfNotPresent
+  # CloakBrowser's cloakserve binds this port inside the pod. localhost-only;
+  # not exposed on the Service.
+  port: 9222
+  resources: {}
+
+# Concurrency guard. CloakBrowser's free tier allows one session; raise
+# maxSessions only with a CloakBrowser Pro license.
+cloak:
+  maxSessions: 1
+  queueTimeout: "60s"

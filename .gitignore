@@ -29,3 +29,6 @@ Thumbs.db
 dist/
 
 .envrc
+
+# Playwright MCP artifacts
+.playwright-mcp/

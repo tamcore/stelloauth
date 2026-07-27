@@ -1,0 +1,18 @@
+{{- if and .Values.httpRoute.enabled .Values.httpRoute.sse }}
+apiVersion: gateway.nginx.org/v1alpha1
+kind: SnippetsFilter
+metadata:
+  name: {{ include "stelloauth.fullname" . }}-sse
+  labels:
+    {{- include "stelloauth.labels" . | nindent 4 }}
+spec:
+  snippets:
+    # The /oauth endpoint streams progress over Server-Sent Events and a single
+    # login can take 60-120s. nginx-gateway-fabric buffers responses and defaults
+    # to a 60s proxy timeout, which freezes the stream and cuts long logins.
+    - context: http.server.location
+      value: |
+        proxy_buffering off;
+        proxy_read_timeout {{ .Values.httpRoute.sseTimeout }};
+        proxy_send_timeout {{ .Values.httpRoute.sseTimeout }};
+{{- end }}

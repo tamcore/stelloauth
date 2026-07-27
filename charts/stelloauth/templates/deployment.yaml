@@ -51,6 +51,14 @@ spec:
             - name: RATE_LIMIT_DURATION
               value: {{ .Values.rateLimit.duration | quote }}
             {{- end }}
+            {{- if .Values.cloakbrowser.enabled }}
+            - name: CLOAK_CDP_URL
+              value: "http://localhost:{{ .Values.cloakbrowser.port }}"
+            {{- end }}
+            - name: CLOAK_MAX_SESSIONS
+              value: {{ .Values.cloak.maxSessions | quote }}
+            - name: CLOAK_QUEUE_TIMEOUT
+              value: {{ .Values.cloak.queueTimeout | quote }}
             {{- range $key, $value := .Values.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -61,6 +69,18 @@ spec:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.cloakbrowser.enabled }}
+        - name: cloakbrowser
+          image: "{{ .Values.cloakbrowser.image.repository }}:{{ .Values.cloakbrowser.image.tag }}"
+          imagePullPolicy: {{ .Values.cloakbrowser.image.pullPolicy }}
+          args: ["cloakserve"]
+          ports:
+            - name: cdp
+              containerPort: {{ .Values.cloakbrowser.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.cloakbrowser.resources | nindent 12 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

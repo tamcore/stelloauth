@@ -1,8 +1,7 @@
-# Runtime stage - using chromedp's docker image which includes Chrome
-FROM chromedp/headless-shell:latest
-
-# Install CA certificates for HTTPS requests
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# Runtime stage - the app no longer launches Chrome (a CloakBrowser sidecar does).
+# Distroless static: CA certs included, no shell, runs as nonroot. Pinned by
+# digest (Renovate keeps it current).
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
 
 # Copy binary from goreleaser build context
 ARG TARGETPLATFORM

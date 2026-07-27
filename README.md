@@ -16,9 +16,9 @@ Based on the work done in [stellantis-oauth-helper](https://github.com/benbox69/
 
 ## Requirements
 
-The application uses headless Chrome (via chromedp) to automate the OAuth flow. Chrome/Chromium must be installed on the system.
+The application automates the OAuth flow by driving a [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) stealth Chromium over the Chrome DevTools Protocol. CloakBrowser passes Stellantis' bot protection (invisible reCAPTCHA) that a plain headless Chrome cannot.
 
-When running in Docker, Chrome is included in the container image.
+CloakBrowser runs as a separate process: a sidecar container in Kubernetes, a second service in Docker Compose, or baked into the dev image (`Dockerfile.dev`). The app connects to it via the required `CLOAK_CDP_URL` environment variable and does **not** need Chrome installed itself.
 
 ## Installation
 
@@ -40,11 +40,17 @@ helm upgrade --install \
 
 ### Docker
 
+stelloauth needs a CloakBrowser CDP endpoint, so run both containers together:
+
 ```bash
-docker run -p 8080:8080 ghcr.io/tamcore/stelloauth:latest
+docker run -d --name cloakbrowser cloakhq/cloakbrowser:0.5.2 cloakserve
+docker run -p 8080:8080 \
+  --link cloakbrowser \
+  -e CLOAK_CDP_URL=http://cloakbrowser:9222 \
+  ghcr.io/tamcore/stelloauth:latest
 ```
 
-Then open http://localhost:8080 in your browser.
+Then open http://localhost:8080 in your browser. For most users, Docker Compose below is simpler.
 
 ### Docker Compose
 
@@ -52,7 +58,7 @@ Then open http://localhost:8080 in your browser.
 docker compose up -d
 ```
 
-See [docker-compose.yaml](docker-compose.yaml) for the example configuration.
+The compose stack runs a CloakBrowser sidecar (`cloakbrowser`) that stelloauth connects to via `CLOAK_CDP_URL`. CloakBrowser drives the login in a stealth Chromium to pass Stellantis' bot protection. The free CloakBrowser tier allows one concurrent login at a time; additional requests queue briefly. See [docker-compose.yaml](docker-compose.yaml) for the full configuration.
 
 ### Binary
 
@@ -64,12 +70,15 @@ Download the latest release from the [releases page](https://github.com/tamcore/
 
 The server starts on port 8080 by default.
 
-**Note:** You need Chrome/Chromium installed on your system for the binary to work.
+**Note:** The binary requires a running CloakBrowser CDP endpoint. Start one with `docker run -p 9222:9222 cloakhq/cloakbrowser:0.5.2 cloakserve` and set `CLOAK_CDP_URL=http://localhost:9222` before launching stelloauth.
 
 ## Configuration
 
 | Environment Variable | Default   | Description                                      |
 |---------------------|-----------|--------------------------------------------------|
+| `CLOAK_CDP_URL`     | *required* | CloakBrowser CDP endpoint (e.g. `http://localhost:9222`). The server exits at startup if unset. |
+| `CLOAK_MAX_SESSIONS` | `1`      | Max concurrent browser sessions (CloakBrowser free tier allows 1) |
+| `CLOAK_QUEUE_TIMEOUT` | `60s`   | How long a request waits for a free session before failing |
 | `PORT`              | `8080`    | HTTP server port                                 |
 | `HTTP_ADDRESS`      | `0.0.0.0` | Bind address                                     |
 | `RATE_LIMIT_COUNT`  | -         | Max requests per IP in the rate limit window     |
@@ -80,6 +89,7 @@ Rate limiting is disabled by default. Set both `RATE_LIMIT_COUNT` and `RATE_LIMI
 Example with rate limiting (3 requests per 24 hours):
 ```bash
 docker run -p 8080:8080 \
+  -e CLOAK_CDP_URL=http://cloakbrowser:9222 \
   -e RATE_LIMIT_COUNT=3 \
   -e RATE_LIMIT_DURATION=24h \
   ghcr.io/tamcore/stelloauth:latest
@@ -90,7 +100,7 @@ docker run -p 8080:8080 \
 1. Select your brand (e.g., MyPeugeot) and country
 2. Enter your Stellantis account credentials
 3. Click "Get OAuth Code"
-4. The server automates the login flow using headless Chrome
+4. The server automates the login flow using a CloakBrowser stealth Chromium (which passes Stellantis' bot protection)
 5. Copy the OAuth code for use with your integration
 
 Your credentials are only used to authenticate with Stellantis servers and are never stored.
