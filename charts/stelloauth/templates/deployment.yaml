@@ -78,6 +78,18 @@ spec:
             - name: cdp
               containerPort: {{ .Values.cloakbrowser.port }}
               protocol: TCP
+          {{- with .Values.cloakbrowser.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.cloakbrowser.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.cloakbrowser.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.cloakbrowser.resources | nindent 12 }}
         {{- end }}
