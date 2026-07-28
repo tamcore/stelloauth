@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -47,6 +49,7 @@ type RateLimiter struct {
 }
 
 var rateLimiter *RateLimiter
+var countryDB *CountryDB
 
 func initRateLimiter() {
 	limitStr := os.Getenv("RATE_LIMIT_COUNT")
@@ -198,10 +201,18 @@ func main() {
 		getDurationEnv("CLOAK_QUEUE_TIMEOUT", 60*time.Second),
 	)
 
+	if db, err := loadCountryDB(os.Getenv("GEOIP_COUNTRY_DB")); err != nil {
+		log.Printf("GeoIP country pre-selection disabled: %v", err)
+	} else if db != nil {
+		countryDB = db
+		log.Printf("GeoIP country pre-selection enabled")
+	}
+
 	initRateLimiter()
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/configs", handleConfigs)
+	http.HandleFunc("/geo", handleGeo)
 	http.HandleFunc("/oauth", handleOAuth)
 
 	addr := fmt.Sprintf("%s:%s", address, port)
@@ -229,6 +240,30 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 func handleConfigs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(configsJSON)
+}
+
+func handleGeo(w http.ResponseWriter, r *http.Request) {
+	country := ""
+	if ip, ok := parseClientIP(getClientIP(r)); ok {
+		country = countryDB.Country(ip)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"country": country})
+}
+
+// parseClientIP turns getClientIP's output (a bare IP from a proxy header, or an
+// "ip:port" RemoteAddr) into a netip.Addr.
+func parseClientIP(s string) (netip.Addr, bool) {
+	s = strings.TrimSpace(s)
+	if ap, err := netip.ParseAddr(s); err == nil {
+		return ap, true
+	}
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		if ap, err := netip.ParseAddr(host); err == nil {
+			return ap, true
+		}
+	}
+	return netip.Addr{}, false
 }
 
 func getClientIP(r *http.Request) string {

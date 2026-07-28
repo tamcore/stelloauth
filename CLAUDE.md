@@ -41,6 +41,7 @@ browser and captures the `code` from the custom-scheme redirect.
 | `CLOAK_QUEUE_TIMEOUT` | `60s` | How long a request waits for a free session. |
 | `PORT` / `HTTP_ADDRESS` | `8080` / `0.0.0.0` | Server bind. |
 | `RATE_LIMIT_COUNT` / `RATE_LIMIT_DURATION` | off | Per-IP rate limit; set both to enable. |
+| `GEOIP_COUNTRY_DB` | unset | Path or URL to a GeoLite2-Country `.mmdb`/`.mmdb.gz`; enables IP-based country pre-selection. Unset disables it. |
 
 ## Common commands
 

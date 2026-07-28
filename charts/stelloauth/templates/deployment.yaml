@@ -59,6 +59,10 @@ spec:
               value: {{ .Values.cloak.maxSessions | quote }}
             - name: CLOAK_QUEUE_TIMEOUT
               value: {{ .Values.cloak.queueTimeout | quote }}
+            {{- if .Values.geoip.countryDB }}
+            - name: GEOIP_COUNTRY_DB
+              value: {{ .Values.geoip.countryDB | quote }}
+            {{- end }}
             {{- range $key, $value := .Values.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

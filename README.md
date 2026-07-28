@@ -83,6 +83,7 @@ The server starts on port 8080 by default.
 | `HTTP_ADDRESS`      | `0.0.0.0` | Bind address                                     |
 | `RATE_LIMIT_COUNT`  | -         | Max requests per IP in the rate limit window     |
 | `RATE_LIMIT_DURATION` | -       | Rate limit window duration (e.g., `24h`, `1h30m`) |
+| `GEOIP_COUNTRY_DB` | unset | Path or URL to a GeoLite2-Country `.mmdb`/`.mmdb.gz`; enables IP-based country pre-selection. Unset disables it. |
 
 Rate limiting is disabled by default. Set both `RATE_LIMIT_COUNT` and `RATE_LIMIT_DURATION` to enable it.
 

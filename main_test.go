@@ -93,3 +93,65 @@ func TestGetEnv(t *testing.T) {
 		t.Errorf("expected 'default', got '%s'", result)
 	}
 }
+
+const testIP = "81.2.69.142"
+
+func TestHandleGeo_NilDB(t *testing.T) {
+	countryDB = nil
+	req := httptest.NewRequest(http.MethodGet, "/geo", nil)
+	req.Header.Set("X-Forwarded-For", testIP)
+	w := httptest.NewRecorder()
+
+	handleGeo(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]string
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp["country"] != "" {
+		t.Errorf("country = %q, want empty when DB disabled", resp["country"])
+	}
+}
+
+func TestHandleGeo_Resolves(t *testing.T) {
+	db, err := loadCountryDB(writeTemp(t, "geo.mmdb", buildTestCountryDB(t)))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	countryDB = db
+	defer func() { countryDB = nil }()
+
+	req := httptest.NewRequest(http.MethodGet, "/geo", nil)
+	req.Header.Set("X-Forwarded-For", testIP)
+	w := httptest.NewRecorder()
+
+	handleGeo(w, req)
+
+	var resp map[string]string
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp["country"] != "GB" {
+		t.Errorf("country = %q, want GB", resp["country"])
+	}
+}
+
+func TestParseClientIP(t *testing.T) {
+	cases := map[string]string{
+		testIP:            testIP, // bare (XFF / X-Real-IP form)
+		testIP + ":52048": testIP, // host:port (RemoteAddr form)
+		"[::1]:52048":     "::1",
+		"garbage":         "", // unparseable -> ok=false
+	}
+	for in, want := range cases {
+		got, ok := parseClientIP(in)
+		if want == "" {
+			if ok {
+				t.Errorf("parseClientIP(%q) ok=true, want false", in)
+			}
+			continue
+		}
+		if !ok || got.String() != want {
+			t.Errorf("parseClientIP(%q) = %q,%v; want %q,true", in, got, ok, want)
+		}
+	}
+}

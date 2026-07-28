@@ -145,3 +145,9 @@ cloakbrowser:
 cloak:
   maxSessions: 1
   queueTimeout: "60s"
+
+# Optional IP-based country pre-selection. Set to a GeoLite2-Country .mmdb path
+# or URL (e.g. https://cdn.jsdelivr.net/npm/geolite2-country/GeoLite2-Country.mmdb.gz)
+# to enable; empty disables it.
+geoip:
+  countryDB: ""

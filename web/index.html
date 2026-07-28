@@ -256,7 +256,7 @@ select option { background: var(--surface); }
 <div class="header">
   <div class="logo">Stelloauth</div>
   <p class="tagline">
-    Generate OAuth codes for Stellantis vehicles to use with your 
+    Generate OAuth codes for Stellantis vehicles to use with your
     <a href="https://github.com/andreadegiovine/homeassistant-stellantis-vehicles" target="_blank">Home Assistant integration</a>.
     This service uses a headless browser to complete the login flow on your behalf — credentials are used once and never stored.
   </p>
@@ -307,6 +307,7 @@ select option { background: var(--surface); }
 
 <script>
 let configs = {};
+let detectedCountry = '';
 let lastCode = '';
 
 function toggleDebug() {
@@ -320,7 +321,14 @@ async function loadConfigs() {
   try {
     const r = await fetch('/configs');
     configs = await r.json();
-    
+
+    try {
+      const geo = await (await fetch('/geo')).json();
+      detectedCountry = geo.country || '';
+    } catch (e) {
+      detectedCountry = '';
+    }
+
     const brandSelect = document.getElementById('brand');
     brandSelect.innerHTML = '';
     for (const brand of Object.keys(configs).sort()) {
@@ -328,7 +336,7 @@ async function loadConfigs() {
         brandSelect.innerHTML += `<option value="${brand}">${brand}</option>`;
       }
     }
-    
+
     brandSelect.addEventListener('change', updateCountries);
     updateCountries();
   } catch (e) {
@@ -341,11 +349,15 @@ async function loadConfigs() {
 function updateCountries() {
   const brand = document.getElementById('brand').value;
   const countrySelect = document.getElementById('country');
-  
+
   countrySelect.innerHTML = '';
   if (configs[brand] && configs[brand].configs) {
     for (const country of Object.keys(configs[brand].configs).sort()) {
       countrySelect.innerHTML += `<option value="${country}">${country}</option>`;
+    }
+    // Pre-select the IP-detected country when this brand offers it.
+    if (detectedCountry && configs[brand].configs[detectedCountry]) {
+      countrySelect.value = detectedCountry;
     }
   }
 }
@@ -355,7 +367,7 @@ async function startOAuth() {
   const box = document.getElementById('result');
   const copyBtn = document.getElementById('copyBtn');
   const debugBox = document.getElementById('debug');
-  
+
   btn.disabled = true;
   btn.innerText = 'Authenticating...';
   box.className = 'result-body info';
@@ -376,7 +388,7 @@ async function startOAuth() {
   try {
     const response = await fetch('/oauth', {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream'
       },
@@ -401,7 +413,7 @@ async function startOAuth() {
 
       const text = decoder.decode(value);
       const lines = text.split('\n');
-      
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
