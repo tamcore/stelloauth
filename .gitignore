@@ -32,3 +32,6 @@ dist/
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Local design docs / specs / plans (not tracked)
+docs/superpowers/
