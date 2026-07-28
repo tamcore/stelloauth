@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 )
@@ -204,30 +205,31 @@ func performChromedpOAuth(
 	}
 
 	// Wait until the whole login form (incl. submit button) has rendered, then
-	// type credentials with real key events so Gigya's validation fires.
+	// fill credentials. Stellantis silently drops CDP synthetic key/mouse events
+	// on the Gigya login page (SendKeys/Click never reach the node, leaving the
+	// field empty), so type via Input.insertText into the focused field instead;
+	// it lands and fires the input event Gigya's validation listens for. Settle
+	// briefly first for a cold browser.
 	setPhase("Entering credentials")
-	// Type credentials with real key events (Gigya's validation and bot scoring
-	// need genuine input). SendKeys focuses the node itself, so no explicit Click
-	// (which fails with "not focusable" while the Gigya screenset is still
-	// wiring up). Settle briefly first for a cold browser.
 	err = chromedp.Run(browserCtx,
 		chromedp.WaitVisible(passwordSelector, chromedp.ByQuery),
 		chromedp.WaitVisible(submitSelector, chromedp.ByQuery),
 		chromedp.Sleep(1500*time.Millisecond),
-		chromedp.SendKeys(emailSelector, email, chromedp.ByQuery),
-		chromedp.SendKeys(passwordSelector, password, chromedp.ByQuery),
+		chromedp.Focus(emailSelector, chromedp.ByQuery),
+		input.InsertText(email),
+		chromedp.Sleep(300*time.Millisecond),
+		chromedp.Focus(passwordSelector, chromedp.ByQuery),
+		input.InsertText(password),
 		chromedp.Sleep(500*time.Millisecond),
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to fill credentials: %v", err)
 	}
 
-	// Submit login form using Click
+	// Submit the login form. Synthetic CDP clicks are dropped on this page (see
+	// above), so trigger submission via a DOM element.click() instead.
 	setPhase("Signing in")
-	err = chromedp.Run(browserCtx,
-		chromedp.Click(submitSelector, chromedp.ByQuery),
-	)
-	if err != nil {
+	if err := jsClick(browserCtx, submitSelector); err != nil {
 		return "", fmt.Errorf("failed to submit login: %v", err)
 	}
 
@@ -295,26 +297,33 @@ func performChromedpOAuth(
 	return "", fmt.Errorf("authentication failed - could not retrieve OAuth code")
 }
 
-// clickAuthorizeAndWait looks for a post-login authorization/consent control
-// (trying each selector with a short timeout), clicks the first one found, and
-// then waits briefly for the OAuth redirect to be captured. codeSet reports
-// whether the redirect code has already arrived.
+// clickAuthorizeAndWait looks for a post-login authorization/consent control,
+// clicks the first one found, and then waits for the OAuth redirect to be
+// captured. codeSet reports whether the redirect code has already arrived. The
+// consent page can render slowly (notably Citroen: heavy fonts/select2), so the
+// selector scan is retried until a deadline rather than in a single pass.
 func clickAuthorizeAndWait(
 	browserCtx context.Context, selectors []string, requestID string,
 	setPhase func(string), codeSet func() bool,
 ) {
-	var authorizeFound bool
-	for _, selector := range selectors {
-		checkCtx, checkCancel := context.WithTimeout(browserCtx, 3*time.Second)
-		err := chromedp.Run(checkCtx, chromedp.WaitVisible(selector, chromedp.ByQuery))
-		checkCancel()
+	const findDeadline = 60 * time.Second
+	deadline := time.Now().Add(findDeadline)
 
-		if err == nil {
-			authorizeFound = true
-			setPhase("Confirming authorization")
-			log.Printf("[%s] Found authorize button with selector: %s", requestID, selector)
-			_ = chromedp.Run(browserCtx, chromedp.Click(selector, chromedp.ByQuery))
-			break
+	var authorizeFound bool
+	for !authorizeFound && !codeSet() && time.Now().Before(deadline) {
+		for _, selector := range selectors {
+			checkCtx, checkCancel := context.WithTimeout(browserCtx, 1500*time.Millisecond)
+			err := chromedp.Run(checkCtx, chromedp.WaitVisible(selector, chromedp.ByQuery))
+			checkCancel()
+
+			if err == nil {
+				authorizeFound = true
+				setPhase("Confirming authorization")
+				log.Printf("[%s] Found authorize button with selector: %s", requestID, selector)
+				// element.click() — synthetic CDP clicks are dropped on the consent page.
+				_ = jsClick(browserCtx, selector)
+				break
+			}
 		}
 	}
 
@@ -323,12 +332,28 @@ func clickAuthorizeAndWait(
 	}
 
 	setPhase("Waiting for redirect")
-	for range 5 {
+	for range 10 {
 		if codeSet() {
 			break
 		}
 		_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
 	}
+}
+
+// jsClick clicks the first element matching selector via a DOM element.click().
+// Stellantis drops CDP synthetic mouse events on its login/consent pages, so a
+// real chromedp.Click never reaches the node; element.click() does. The selector
+// is JSON-encoded to embed safely (it may contain quotes/brackets).
+func jsClick(ctx context.Context, selector string) error {
+	sel, err := json.Marshal(selector)
+	if err != nil {
+		return err
+	}
+	var ok bool
+	return chromedp.Run(ctx, chromedp.Evaluate(
+		fmt.Sprintf(`(function(){var e=document.querySelector(%s);if(!e)return false;e.click();return true;})()`, sel),
+		&ok,
+	))
 }
 
 // startProgressHeartbeat runs a goroutine that emits "<phase>... (Ns)" every

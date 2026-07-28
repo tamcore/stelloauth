@@ -91,12 +91,18 @@ so the app image tag defaults to the release version.
 
 ## Gotchas / conventions
 
-- **Credential entry**: use `chromedp.SendKeys` (real key events — the login and
-  bot scoring need genuine input). Do **not** `Click` the field first; it can
-  fail "not focusable" while the login form is still initializing. `SendKeys`
-  focuses the node itself.
-- **Consent page**: the post-login authorization control is `#consentbutton`
-  ("CONTINUE"); it is included in `authorizeSelectors`.
+- **Synthetic input is dropped** on the Stellantis login + consent pages: CDP
+  key/mouse events (`chromedp.SendKeys`/`chromedp.Click`) never reach the nodes
+  (0 events fire; fields stay empty). Fill via `chromedp.Focus` + `input.InsertText`
+  and submit/consent via a DOM `element.click()` (`jsClick`). Do not revert to
+  SendKeys/Click. (Discovered 2026-07; plain pages are unaffected.)
+- **Consent page**: post-login consent is at `id-dcr.<brand>.com/index/authorize-consentments`
+  ("LOG IN COMPLETE, READY TO EXPLORE?"); the control is `#consentbutton`
+  ("CONTINUE"), included in `authorizeSelectors`. It POSTs `decision=allow` to
+  `/am/oauth2/authorize`, which redirects to the custom scheme carrying `code`;
+  the network listener captures it (the browser can't load the scheme, so the
+  page URL never changes). The consent page can render slowly (Citroen), so
+  `clickAuthorizeAndWait` retries the selector scan until a deadline.
 - **Per-request isolation**: pass a unique `fingerprint` (the request ID) when
   discovering the CDP URL so each request gets an isolated CloakBrowser session.
   Reusing a single shared browser wedges subsequent logins.
