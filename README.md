@@ -110,7 +110,7 @@ Your credentials are only used to authenticate with Stellantis servers and are n
 
 ```bash
 # Build binary
-go build -o stelloauth .
+go build -o stelloauth ./cmd/stelloauth
 
 # Run tests
 go test -v ./...

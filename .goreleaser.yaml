@@ -10,7 +10,7 @@ before:
 
 builds:
   - id: stelloauth
-    main: .
+    main: ./cmd/stelloauth
     binary: stelloauth
     env:
       - CGO_ENABLED=0

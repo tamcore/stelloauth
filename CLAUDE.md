@@ -7,7 +7,7 @@ browser and captures the `code` from the custom-scheme redirect.
 
 ## Architecture
 
-- **App** (`main.go`): HTTP server (`/`, `/configs`, `/oauth`). `/oauth` accepts
+- **App** (`internal/app`): HTTP server (`/`, `/configs`, `/oauth`). `/oauth` accepts
   JSON `{brand, country, email, password}` and returns the OAuth `code`. Sends
   live progress over Server-Sent Events when the client sends
   `Accept: text/event-stream`.
@@ -23,12 +23,13 @@ browser and captures the `code` from the custom-scheme redirect.
 
 | File | Responsibility |
 |------|----------------|
-| `main.go` | HTTP handlers, OAuth/chromedp flow, progress heartbeat |
-| `browser.go` | Discover the CloakBrowser CDP websocket URL |
-| `session.go` | Concurrency gate (bounded browser sessions) |
-| `config.go` | Env parsing helpers, `sessionGate` |
-| `configs.json` | Embedded brand/country OAuth config (mirrors the upstream HA integration's `configs.json`) |
-| `web/index.html` | Embedded UI |
+| `cmd/stelloauth/main.go` | Process entrypoint |
+| `internal/app/app.go` | Application startup |
+| `internal/app/server.go` | HTTP handlers and embedded assets |
+| `internal/app/oauth.go` | OAuth/chromedp flow and progress heartbeat |
+| `internal/app/browser.go` | Discover the CloakBrowser CDP websocket URL |
+| `internal/app/session.go` | Concurrency gate (bounded browser sessions) |
+| `internal/app/configs.json` | Embedded brand/country OAuth config (mirrors the upstream HA integration's `configs.json`) |
 | `e2e/e2e_test.sh` | End-to-end test harness |
 | `charts/stelloauth/` | Helm chart (app + CloakBrowser sidecar) |
 
@@ -46,7 +47,7 @@ browser and captures the `code` from the custom-scheme redirect.
 ## Common commands
 
 ```bash
-go build ./...
+go build ./cmd/stelloauth
 go vet ./...
 go test ./...
 gofmt -l .          # must be empty
@@ -59,7 +60,7 @@ Run locally (needs a CloakBrowser CDP endpoint):
 docker compose up -d          # app + CloakBrowser sidecar
 # or run CloakBrowser yourself, then:
 export CLOAK_CDP_URL=http://localhost:9222
-go run .
+go run ./cmd/stelloauth
 ```
 
 E2E (drives a real login; requires a running CloakBrowser and real
@@ -99,7 +100,7 @@ so the app image tag defaults to the release version.
 - **Per-request isolation**: pass a unique `fingerprint` (the request ID) when
   discovering the CDP URL so each request gets an isolated CloakBrowser session.
   Reusing a single shared browser wedges subsequent logins.
-- **configs.json** is the source of client IDs/secrets; keep it in sync with the
+- **internal/app/configs.json** is the source of client IDs/secrets; keep it in sync with the
   upstream HA integration.
 - Follow existing style; keep files small and focused. `golangci-lint` is the
   quality gate (errcheck, gocyclo, lll, unparam, etc.).

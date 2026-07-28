@@ -38,7 +38,7 @@ trap cleanup EXIT
 start_server() {
     echo "Building stelloauth..."
     cd "$PROJECT_DIR"
-    go build -o stelloauth .
+    go build -o stelloauth ./cmd/stelloauth
 
     echo "Starting stelloauth on port $PORT..."
     PORT="$PORT" ./stelloauth &

@@ -5,7 +5,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o stelloauth .
+RUN CGO_ENABLED=0 go build -o stelloauth ./cmd/stelloauth
 
 # Runtime: the CloakBrowser image bundles stealth Chrome + cloakserve.
 FROM cloakhq/cloakbrowser:0.5.2
