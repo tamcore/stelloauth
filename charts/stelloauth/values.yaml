@@ -116,6 +116,29 @@ cloakbrowser:
   # not exposed on the Service.
   port: 9222
   resources: {}
+  # cloakserve binds 127.0.0.1:9222 only, so httpGet probes (which use the pod IP)
+  # never reach it. Probe with exec+curl against localhost inside the container.
+  # cloakserve can wedge (unresponsive) while the container stays "running",
+  # silently breaking logins; the liveness probe restarts it, the startup probe
+  # covers boot, and readiness reflects health.
+  startupProbe:
+    exec:
+      command: ["curl", "-sf", "--max-time", "5", "http://localhost:9222/json/version"]
+    periodSeconds: 5
+    failureThreshold: 60 # up to ~5 min to bind (first start downloads Chrome)
+    timeoutSeconds: 6
+  livenessProbe:
+    exec:
+      command: ["curl", "-sf", "--max-time", "5", "http://localhost:9222/json/version"]
+    periodSeconds: 15
+    timeoutSeconds: 6
+    failureThreshold: 3
+  readinessProbe:
+    exec:
+      command: ["curl", "-sf", "--max-time", "5", "http://localhost:9222/json/version"]
+    periodSeconds: 10
+    timeoutSeconds: 6
+    failureThreshold: 3
 
 # Concurrency guard. CloakBrowser's free tier allows one session; raise
 # maxSessions only with a CloakBrowser Pro license.
