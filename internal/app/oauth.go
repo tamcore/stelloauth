@@ -106,9 +106,19 @@ func performChromedpOAuth(
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(ctx, wsURL)
 	defer allocCancel()
 
-	// Create browser context
+	// CloakBrowser gives each unique fingerprint its own Chrome process, so the
+	// per-request fingerprint already isolates cookies/storage between users;
+	// no incognito context is added (cloakserve rejects createBrowserContext).
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
-	defer browserCancel()
+	// Gracefully close the page target on exit before the websocket drops, so
+	// CloakBrowser tears the session down cleanly and reclaims its memory;
+	// chromedp.Cancel waits for that, browserCancel is the fallback if it errors.
+	defer func() {
+		if err := chromedp.Cancel(browserCtx); err != nil {
+			log.Printf("[%s] browser context cleanup failed: %v", requestID, err)
+		}
+		browserCancel()
+	}()
 
 	var oauthCode string
 	var flowError string // captured Stellantis OPErrorPage.php error, if any
