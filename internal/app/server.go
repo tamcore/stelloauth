@@ -60,6 +60,7 @@ func newApplicationMux() *http.ServeMux {
 	mux.HandleFunc("/configs", handleConfigs)
 	mux.HandleFunc("/geo", handleGeo)
 	mux.HandleFunc("/oauth", handleOAuth)
+	mux.HandleFunc("/worker", handleWorker)
 	return mux
 }
 
