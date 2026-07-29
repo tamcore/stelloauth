@@ -41,6 +41,7 @@ func Run() error {
 	http.HandleFunc("/configs", handleConfigs)
 	http.HandleFunc("/geo", handleGeo)
 	http.HandleFunc("/oauth", handleOAuth)
+	http.HandleFunc("/worker", handleWorker)
 
 	addr := fmt.Sprintf("%s:%s", address, port)
 	log.Printf("Starting server on %s", addr)
