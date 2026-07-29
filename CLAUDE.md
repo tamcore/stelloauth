@@ -7,10 +7,12 @@ browser and captures the `code` from the custom-scheme redirect.
 
 ## Architecture
 
-- **App** (`internal/app`): HTTP server (`/`, `/configs`, `/oauth`). `/oauth` accepts
-  JSON `{brand, country, email, password}` and returns the OAuth `code`. Sends
-  live progress over Server-Sent Events when the client sends
-  `Accept: text/event-stream`.
+- **App** (`internal/app`): HTTP server (`/`, `/configs`, `/oauth`, `/worker`).
+  `/oauth` accepts JSON `{brand, country, email, password}` and returns the OAuth
+  `code`. Sends live progress over Server-Sent Events when the client sends
+  `Accept: text/event-stream`. `/worker` is a worker-v2-compatible endpoint
+  (accepts a pre-built `{url, email, password}`, returns top-level `{code}`) so
+  the HA integration's self-hosted "Login service URL" can target stelloauth.
 - **Browser automation**: `chromedp` connects over the Chrome DevTools Protocol
   to a **CloakBrowser** stealth-Chromium instance (a separate process/container).
   Stellantis' login is behind an invisible reCAPTCHA that plain headless Chrome
@@ -27,6 +29,7 @@ browser and captures the `code` from the custom-scheme redirect.
 | `internal/app/app.go` | Application startup |
 | `internal/app/server.go` | HTTP handlers and embedded assets |
 | `internal/app/oauth.go` | OAuth/chromedp flow and progress heartbeat |
+| `internal/app/worker.go` | worker-v2-compatible `/worker` endpoint (self-hosted HA login service) |
 | `internal/app/browser.go` | Discover the CloakBrowser CDP websocket URL |
 | `internal/app/session.go` | Concurrency gate (bounded browser sessions) |
 | `internal/app/configs.json` | Embedded brand/country OAuth config (mirrors the upstream HA integration's `configs.json`) |

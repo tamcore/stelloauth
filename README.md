@@ -13,6 +13,7 @@ Based on the work done in [stellantis-oauth-helper](https://github.com/benbox69/
 - ✅ Automatically fetches latest configuration
 - ✅ Single binary with embedded web UI
 - ✅ Docker container available
+- ✅ Drop-in self-hosted worker for the Home Assistant integration's remote login
 
 ## Requirements
 
@@ -105,6 +106,33 @@ docker run -p 8080:8080 \
 5. Copy the OAuth code for use with your integration
 
 Your credentials are only used to authenticate with Stellantis servers and are never stored.
+
+## Home Assistant remote-login worker (self-hosted)
+
+The Home Assistant Stellantis Vehicles integration can drive its remote login
+against a self-hosted worker instead of the shared public instance (see
+[PR #510](https://github.com/andreadegiovine/homeassistant-stellantis-vehicles/pull/510)).
+stelloauth exposes a compatible endpoint, so you can point the integration's
+**Login service URL** field at your own deployment:
+
+```
+https://<your-stelloauth-host>/worker
+```
+
+`POST /worker` speaks the worker's JSON contract:
+
+```jsonc
+// request
+{ "url": "<Stellantis authorize URL>", "email": "…", "password": "…" }
+
+// response 200
+{ "code": "<oauth-code>" }
+
+// response 4xx
+{ "message": "<error>", "code": <status> }
+```
+
+This is separate from the browser UI at `/`; both can run from the same instance.
 
 ## Building from Source
 
