@@ -4,20 +4,22 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
 )
 
 const (
-	defaultPort    = "8080"
-	defaultAddress = "0.0.0.0"
+	defaultPort           = "8080"
+	defaultAddress        = "0.0.0.0"
+	defaultMetricsPort    = "9090"
+	defaultMetricsAddress = "0.0.0.0"
 )
 
-func Run() error {
-	port := getEnv("PORT", defaultPort)
-	address := getEnv("HTTP_ADDRESS", defaultAddress)
+var applicationMetrics = newOAuthMetrics()
 
+func Run() error {
 	if os.Getenv("CLOAK_CDP_URL") == "" {
 		return errors.New(
 			"CLOAK_CDP_URL is required: set it to the CloakBrowser CDP endpoint (e.g. http://localhost:9222)",
@@ -37,14 +39,19 @@ func Run() error {
 
 	initRateLimiter()
 
-	http.HandleFunc("/", handleIndex)
-	http.HandleFunc("/configs", handleConfigs)
-	http.HandleFunc("/geo", handleGeo)
-	http.HandleFunc("/oauth", handleOAuth)
+	if err := applicationMetrics.initialize(configsJSON); err != nil {
+		return fmt.Errorf("initialize metrics: %w", err)
+	}
 
-	addr := fmt.Sprintf("%s:%s", address, port)
-	log.Printf("Starting server on %s", addr)
-	return http.ListenAndServe(addr, nil)
+	appAddr, metricsAddr := serverAddresses()
+	log.Printf("Starting server on %s", appAddr)
+	log.Printf("Starting metrics server on %s", metricsAddr)
+	return serveHTTPServers(
+		appAddr,
+		metricsAddr,
+		newApplicationMux(),
+		newMetricsMux(applicationMetrics.handler()),
+	)
 }
 
 func getEnv(key, defaultValue string) string {
@@ -52,4 +59,44 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func serverAddresses() (string, string) {
+	appAddr := net.JoinHostPort(
+		getEnv("HTTP_ADDRESS", defaultAddress),
+		getEnv("PORT", defaultPort),
+	)
+	metricsAddr := net.JoinHostPort(
+		getEnv("METRICS_ADDRESS", defaultMetricsAddress),
+		getEnv("METRICS_PORT", defaultMetricsPort),
+	)
+	return appAddr, metricsAddr
+}
+
+func serveHTTPServers(appAddr, metricsAddr string, appHandler, metricsHandler http.Handler) error {
+	appListener, err := net.Listen("tcp", appAddr)
+	if err != nil {
+		return fmt.Errorf("application listener: %w", err)
+	}
+
+	metricsListener, err := net.Listen("tcp", metricsAddr)
+	if err != nil {
+		_ = appListener.Close()
+		return fmt.Errorf("metrics listener: %w", err)
+	}
+
+	appServer := &http.Server{Handler: appHandler}
+	metricsServer := &http.Server{Handler: metricsHandler}
+	errs := make(chan error, 2)
+	go func() {
+		errs <- fmt.Errorf("application server: %w", appServer.Serve(appListener))
+	}()
+	go func() {
+		errs <- fmt.Errorf("metrics server: %w", metricsServer.Serve(metricsListener))
+	}()
+
+	err = <-errs
+	_ = appServer.Close()
+	_ = metricsServer.Close()
+	return err
 }

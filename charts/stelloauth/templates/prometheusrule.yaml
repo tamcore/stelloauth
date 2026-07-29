@@ -1,0 +1,50 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "stelloauth.fullname" . }}
+  labels:
+    {{- include "stelloauth.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: stelloauth.oauth
+      rules:
+        - alert: StelloauthOAuthFailureRatioHigh
+          expr: |
+            (
+              sum by (brand, country) (
+                increase(stelloauth_oauth_failure_total{namespace="{{ .Release.Namespace }}",service="{{ include "stelloauth.fullname" . }}-metrics"}[{{ .Values.monitoring.prometheusRule.failureRatio.window }}])
+              )
+              /
+              (
+                sum by (brand, country) (
+                  increase(stelloauth_oauth_failure_total{namespace="{{ .Release.Namespace }}",service="{{ include "stelloauth.fullname" . }}-metrics"}[{{ .Values.monitoring.prometheusRule.failureRatio.window }}])
+                )
+                +
+                sum by (brand, country) (
+                  increase(stelloauth_oauth_success_total{namespace="{{ .Release.Namespace }}",service="{{ include "stelloauth.fullname" . }}-metrics"}[{{ .Values.monitoring.prometheusRule.failureRatio.window }}])
+                )
+              )
+            ) > {{ .Values.monitoring.prometheusRule.failureRatio.threshold }}
+            and on (brand, country)
+            (
+              sum by (brand, country) (
+                increase(stelloauth_oauth_failure_total{namespace="{{ .Release.Namespace }}",service="{{ include "stelloauth.fullname" . }}-metrics"}[{{ .Values.monitoring.prometheusRule.failureRatio.window }}])
+              )
+              +
+              sum by (brand, country) (
+                increase(stelloauth_oauth_success_total{namespace="{{ .Release.Namespace }}",service="{{ include "stelloauth.fullname" . }}-metrics"}[{{ .Values.monitoring.prometheusRule.failureRatio.window }}])
+              )
+            ) >= {{ .Values.monitoring.prometheusRule.failureRatio.minimumAttempts }}
+          for: {{ .Values.monitoring.prometheusRule.failureRatio.for }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.failureRatio.severity | quote }}
+          annotations:
+            summary: Stellantis OAuth failure ratio is high
+            description: >-
+              More than {{ mulf .Values.monitoring.prometheusRule.failureRatio.threshold 100 }}% of OAuth attempts
+              for {{ "{{" }} $labels.brand {{ "}}" }}/{{ "{{" }} $labels.country {{ "}}" }} failed.
+{{- end }}

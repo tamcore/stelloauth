@@ -21,7 +21,30 @@ import (
 type ProgressFunc func(step string)
 type DebugFunc func(msg string)
 
+type oauthExecutor func(
+	authURL, email, password, scheme, requestID string,
+	progress ProgressFunc, debug DebugFunc,
+) (string, error)
+
 func performOAuth(req OAuthRequest, requestID string, progress ProgressFunc, debug DebugFunc) (string, error) {
+	return performOAuthWithExecutor(
+		req,
+		requestID,
+		progress,
+		debug,
+		applicationMetrics,
+		performChromedpOAuth,
+	)
+}
+
+func performOAuthWithExecutor(
+	req OAuthRequest,
+	requestID string,
+	progress ProgressFunc,
+	debug DebugFunc,
+	metrics *oauthMetrics,
+	execute oauthExecutor,
+) (string, error) {
 	if progress != nil {
 		progress("Preparing authentication...")
 	}
@@ -55,13 +78,9 @@ func performOAuth(req OAuthRequest, requestID string, progress ProgressFunc, deb
 
 	log.Printf("[%s] Starting OAuth flow for %s/%s", requestID, req.Brand, req.Country)
 
-	// Use chromedp to automate the login flow
-	code, err := performChromedpOAuth(authURL, req.Email, req.Password, brandConfig.Scheme, requestID, progress, debug)
-	if err != nil {
-		return "", err
-	}
-
-	return code, nil
+	code, err := execute(authURL, req.Email, req.Password, brandConfig.Scheme, requestID, progress, debug)
+	metrics.record(req.Brand, req.Country, err)
+	return code, err
 }
 
 func performChromedpOAuth(

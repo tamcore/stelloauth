@@ -27,6 +27,24 @@ service:
   type: ClusterIP
   port: 8080
 
+monitoring:
+  address: "0.0.0.0"
+  port: 9090
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+    interval: "30s"
+    scrapeTimeout: "10s"
+  prometheusRule:
+    enabled: false
+    additionalLabels: {}
+    failureRatio:
+      threshold: 0.5
+      window: "15m"
+      minimumAttempts: 4
+      for: "10m"
+      severity: warning
+
 ingress:
   enabled: false
   className: ""

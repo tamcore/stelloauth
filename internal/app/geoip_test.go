@@ -28,7 +28,7 @@ func buildTestCountryDB(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("ParseCIDR: %v", err)
 	}
-	rec := mmdbtype.Map{"country": mmdbtype.Map{"iso_code": mmdbtype.String("GB")}}
+	rec := mmdbtype.Map{countryKey: mmdbtype.Map{"iso_code": mmdbtype.String("GB")}}
 	if err := w.Insert(network, rec); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}

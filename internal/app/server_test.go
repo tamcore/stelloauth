@@ -46,6 +46,39 @@ func TestHandleIndex_NotFound(t *testing.T) {
 	}
 }
 
+func TestApplicationMuxDoesNotExposeMetrics(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	newApplicationMux().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestMetricsMuxOnlyExposesMetrics(t *testing.T) {
+	metrics := newOAuthMetrics()
+	if err := metrics.initialize([]byte(testMetricsConfigs)); err != nil {
+		t.Fatalf("initialize() error = %v", err)
+	}
+	mux := newMetricsMux(metrics.handler())
+
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResponse := httptest.NewRecorder()
+	mux.ServeHTTP(metricsResponse, metricsRequest)
+	if metricsResponse.Code != http.StatusOK {
+		t.Fatalf("/metrics status = %d, want %d", metricsResponse.Code, http.StatusOK)
+	}
+
+	rootRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	rootResponse := httptest.NewRecorder()
+	mux.ServeHTTP(rootResponse, rootRequest)
+	if rootResponse.Code != http.StatusNotFound {
+		t.Fatalf("/ status = %d, want %d", rootResponse.Code, http.StatusNotFound)
+	}
+}
+
 func TestHandleOAuth_MethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/oauth", nil)
 	w := httptest.NewRecorder()
@@ -109,8 +142,8 @@ func TestHandleGeo_NilDB(t *testing.T) {
 	}
 	var resp map[string]string
 	_ = json.NewDecoder(w.Body).Decode(&resp)
-	if resp["country"] != "" {
-		t.Errorf("country = %q, want empty when DB disabled", resp["country"])
+	if resp[countryKey] != "" {
+		t.Errorf("country = %q, want empty when DB disabled", resp[countryKey])
 	}
 }
 
@@ -130,8 +163,8 @@ func TestHandleGeo_Resolves(t *testing.T) {
 
 	var resp map[string]string
 	_ = json.NewDecoder(w.Body).Decode(&resp)
-	if resp["country"] != "GB" {
-		t.Errorf("country = %q, want GB", resp["country"])
+	if resp[countryKey] != "GB" {
+		t.Errorf("country = %q, want GB", resp[countryKey])
 	}
 }
 

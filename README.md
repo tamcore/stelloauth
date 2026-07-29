@@ -13,6 +13,7 @@ Based on the work done in [stellantis-oauth-helper](https://github.com/benbox69/
 - ✅ Automatically fetches latest configuration
 - ✅ Single binary with embedded web UI
 - ✅ Docker container available
+- ✅ Prometheus metrics and optional monitoring resources
 
 ## Requirements
 
@@ -81,6 +82,8 @@ The server starts on port 8080 by default.
 | `CLOAK_QUEUE_TIMEOUT` | `60s`   | How long a request waits for a free session before failing |
 | `PORT`              | `8080`    | HTTP server port                                 |
 | `HTTP_ADDRESS`      | `0.0.0.0` | Bind address                                     |
+| `METRICS_PORT`      | `9090`    | Prometheus metrics server port                   |
+| `METRICS_ADDRESS`   | `0.0.0.0` | Prometheus metrics bind address                  |
 | `RATE_LIMIT_COUNT`  | -         | Max requests per IP in the rate limit window     |
 | `RATE_LIMIT_DURATION` | -       | Rate limit window duration (e.g., `24h`, `1h30m`) |
 | `GEOIP_COUNTRY_DB` | unset | Path or URL to a GeoLite2-Country `.mmdb`/`.mmdb.gz`; enables IP-based country pre-selection. Unset disables it. |
@@ -95,6 +98,37 @@ docker run -p 8080:8080 \
   -e RATE_LIMIT_DURATION=24h \
   ghcr.io/tamcore/stelloauth:latest
 ```
+
+## Monitoring
+
+Prometheus metrics are served without authentication on a separate listener at
+`METRICS_ADDRESS:METRICS_PORT`. That listener exposes only `/metrics`; the
+standard application listener does not expose metrics.
+
+The following counters are labeled by configured `brand` and `country`:
+
+- `stelloauth_oauth_success_total`
+- `stelloauth_oauth_failure_total`
+
+The Helm chart can create a dedicated metrics Service and ServiceMonitor, plus
+a PrometheusRule:
+
+```yaml
+monitoring:
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+  prometheusRule:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+```
+
+The default alert fires per brand and country when more than 50% of at least
+four OAuth attempts fail within 15 minutes, sustained for 10 minutes. Alert
+thresholds, timing, minimum attempts, and severity are configurable under
+`monitoring.prometheusRule.failureRatio`.
 
 ## How It Works
 

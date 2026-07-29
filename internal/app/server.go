@@ -22,6 +22,8 @@ var configsJSON []byte
 
 var countryDB *CountryDB
 
+const countryKey = "country"
+
 type OAuthRequest struct {
 	Brand    string `json:"brand"`
 	Country  string `json:"country"`
@@ -52,6 +54,21 @@ type CountryConfig struct {
 	ClientSecret string `json:"client_secret"`
 }
 
+func newApplicationMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/configs", handleConfigs)
+	mux.HandleFunc("/geo", handleGeo)
+	mux.HandleFunc("/oauth", handleOAuth)
+	return mux
+}
+
+func newMetricsMux(handler http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", handler)
+	return mux
+}
+
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 		http.NotFound(w, r)
@@ -73,7 +90,7 @@ func handleGeo(w http.ResponseWriter, r *http.Request) {
 		country = countryDB.Country(ip)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"country": country})
+	_ = json.NewEncoder(w).Encode(map[string]string{countryKey: country})
 }
 
 // parseClientIP turns getClientIP's output (a bare IP from a proxy header, or an

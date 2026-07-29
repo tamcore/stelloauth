@@ -11,6 +11,9 @@ browser and captures the `code` from the custom-scheme redirect.
   JSON `{brand, country, email, password}` and returns the OAuth `code`. Sends
   live progress over Server-Sent Events when the client sends
   `Accept: text/event-stream`.
+- **Metrics** (`internal/app`): separate unauthenticated HTTP listener exposing
+  only `/metrics`. OAuth success and failure counters use bounded `brand` and
+  `country` labels from embedded configuration.
 - **Browser automation**: `chromedp` connects over the Chrome DevTools Protocol
   to a **CloakBrowser** stealth-Chromium instance (a separate process/container).
   Stellantis' login is behind an invisible reCAPTCHA that plain headless Chrome
@@ -29,6 +32,7 @@ browser and captures the `code` from the custom-scheme redirect.
 | `internal/app/oauth.go` | OAuth/chromedp flow and progress heartbeat |
 | `internal/app/browser.go` | Discover the CloakBrowser CDP websocket URL |
 | `internal/app/session.go` | Concurrency gate (bounded browser sessions) |
+| `internal/app/metrics.go` | Prometheus registry, target initialization, and outcome counters |
 | `internal/app/configs.json` | Embedded brand/country OAuth config (mirrors the upstream HA integration's `configs.json`) |
 | `e2e/e2e_test.sh` | End-to-end test harness |
 | `charts/stelloauth/` | Helm chart (app + CloakBrowser sidecar) |
@@ -41,6 +45,7 @@ browser and captures the `code` from the custom-scheme redirect.
 | `CLOAK_MAX_SESSIONS` | `1` | Max concurrent browser sessions (free CloakBrowser tier allows 1). |
 | `CLOAK_QUEUE_TIMEOUT` | `60s` | How long a request waits for a free session. |
 | `PORT` / `HTTP_ADDRESS` | `8080` / `0.0.0.0` | Server bind. |
+| `METRICS_PORT` / `METRICS_ADDRESS` | `9090` / `0.0.0.0` | Separate metrics server bind. |
 | `RATE_LIMIT_COUNT` / `RATE_LIMIT_DURATION` | off | Per-IP rate limit; set both to enable. |
 | `GEOIP_COUNTRY_DB` | unset | Path or URL to a GeoLite2-Country `.mmdb`/`.mmdb.gz`; enables IP-based country pre-selection. Unset disables it. |
 
@@ -81,6 +86,10 @@ proxy config to avoid response buffering and short timeouts:
 - Gateway API / nginx-gateway-fabric: a `SnippetsFilter` (`httpRoute.sse: true`)
   injecting `proxy_buffering off; proxy_read_timeout 300s;`. Requires NGF started
   with `--snippets`.
+- `monitoring.serviceMonitor.enabled=true`: dedicated metrics Service and
+  ServiceMonitor; the standard Service remains HTTP-only.
+- `monitoring.prometheusRule.enabled=true`: configurable per-brand/country OAuth
+  failure-ratio alert.
 
 ## Release
 

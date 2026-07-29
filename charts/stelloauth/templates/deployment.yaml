@@ -44,7 +44,14 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.monitoring.port }}
+              protocol: TCP
           env:
+            - name: METRICS_ADDRESS
+              value: {{ .Values.monitoring.address | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.monitoring.port | quote }}
             {{- if .Values.rateLimit.enabled }}
             - name: RATE_LIMIT_COUNT
               value: {{ .Values.rateLimit.count | quote }}
