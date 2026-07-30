@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o stelloauth ./cmd/stelloauth
 
 # Runtime: the CloakBrowser image bundles stealth Chrome + cloakserve.
-FROM cloakhq/cloakbrowser:0.5.2
+FROM cloakhq/cloakbrowser:0.5.3
 
 COPY --from=builder /app/stelloauth /usr/local/bin/stelloauth
 COPY docker-entrypoint.dev.sh /usr/local/bin/docker-entrypoint.dev.sh
