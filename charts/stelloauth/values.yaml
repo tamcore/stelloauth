@@ -128,7 +128,7 @@ cloakbrowser:
   enabled: true
   image:
     repository: cloakhq/cloakbrowser
-    tag: "0.5.7"
+    tag: "0.5.8"
     pullPolicy: IfNotPresent
   # CloakBrowser's cloakserve binds this port inside the pod. localhost-only;
   # not exposed on the Service.
