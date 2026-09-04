@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -93,7 +94,7 @@ func performChromedpOAuth(
 			progress("Waiting for a free browser slot...")
 		}
 	}); err != nil {
-		if err == ErrSessionBusy {
+		if errors.Is(err, ErrSessionBusy) {
 			return "", fmt.Errorf("service is busy, please try again in a few seconds")
 		}
 		return "", err
@@ -149,12 +150,9 @@ func performChromedpOAuth(
 		"peugeot.com", "citroen.com", "opel.com", "vauxhall.com", "dsautomobiles.com",
 	}
 	isRelevantURL := func(u string) bool {
-		for _, domain := range relevantDomains {
-			if strings.Contains(u, domain) {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(relevantDomains, func(domain string) bool {
+			return strings.Contains(u, domain)
+		})
 	}
 
 	// Set up listener for network events to catch the redirect (which fails because browser can't load custom schemes)

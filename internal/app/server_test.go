@@ -35,11 +35,11 @@ func TestHandleIndex(t *testing.T) {
 	}
 }
 
-func TestHandleIndex_NotFound(t *testing.T) {
+func TestApplicationMux_UnknownPathNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	w := httptest.NewRecorder()
 
-	handleIndex(w, req)
+	newApplicationMux().ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", w.Code)
