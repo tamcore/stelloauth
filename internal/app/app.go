@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log"
@@ -55,10 +56,7 @@ func Run() error {
 }
 
 func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+	return cmp.Or(os.Getenv(key), defaultValue)
 }
 
 func serverAddresses() (string, string) {

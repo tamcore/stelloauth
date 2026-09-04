@@ -56,9 +56,12 @@ type CountryConfig struct {
 
 func newApplicationMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleIndex)
-	mux.HandleFunc("/configs", handleConfigs)
-	mux.HandleFunc("/geo", handleGeo)
+	mux.HandleFunc("GET /{$}", handleIndex)
+	mux.HandleFunc("GET /index.html", handleIndex)
+	mux.HandleFunc("GET /configs", handleConfigs)
+	mux.HandleFunc("GET /geo", handleGeo)
+	// /oauth and /worker keep their own method check so a wrong method still
+	// gets the documented JSON error body instead of ServeMux's plain 405.
 	mux.HandleFunc("/oauth", handleOAuth)
 	mux.HandleFunc("/worker", handleWorker)
 	return mux
@@ -70,12 +73,7 @@ func newMetricsMux(handler http.Handler) *http.ServeMux {
 	return mux
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-		http.NotFound(w, r)
-		return
-	}
-
+func handleIndex(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(indexHTML)
 }
@@ -112,8 +110,8 @@ func parseClientIP(s string) (netip.Addr, bool) {
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header first (for reverse proxies)
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+		first, _, _ := strings.Cut(xff, ",")
+		return strings.TrimSpace(first)
 	}
 	// Check X-Real-IP header
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
