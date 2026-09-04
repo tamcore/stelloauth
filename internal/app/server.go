@@ -11,7 +11,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/google/uuid"
+	"uuid"
 )
 
 //go:embed web/index.html

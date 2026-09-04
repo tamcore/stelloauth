@@ -1,14 +1,13 @@
 package app
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // workerRequest is the worker-v2-compatible OAuth request: the caller supplies a
@@ -49,7 +48,7 @@ func handleWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req workerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
 		sendWorkerError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -78,7 +77,7 @@ func handleWorker(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[%s] worker OAuth successful", requestID)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(workerCode{Code: code})
+	_ = json.MarshalWrite(w, workerCode{Code: code})
 }
 
 // redirectScheme extracts the custom redirect scheme (e.g. "mymap") from the
@@ -103,5 +102,5 @@ func redirectScheme(authURL string) (string, error) {
 func sendWorkerError(w http.ResponseWriter, message string, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(workerError{Message: message, Code: statusCode})
+	_ = json.MarshalWrite(w, workerError{Message: message, Code: statusCode})
 }

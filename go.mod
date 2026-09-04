@@ -5,7 +5,6 @@ go 1.27.1
 require (
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
-	github.com/google/uuid v1.6.0
 	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/oschwald/maxminddb-golang/v2 v2.5.0
 	github.com/prometheus/client_golang v1.24.1
