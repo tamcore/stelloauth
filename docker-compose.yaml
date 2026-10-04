@@ -1,6 +1,6 @@
 services:
   cloakbrowser:
-    image: cloakhq/cloakbrowser:0.5.11
+    image: cloakhq/cloakbrowser:0.5.12
     command: ["cloakserve"]
     restart: unless-stopped
 
