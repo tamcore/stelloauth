@@ -1,6 +1,6 @@
 module github.com/tamcore/stelloauth
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
